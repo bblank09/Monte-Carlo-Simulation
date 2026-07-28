@@ -1,0 +1,12 @@
+.env
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+.ipynb_checkpoints/
+__pycache__/
+conf/
+webull_data_sdk.log
+.venv/
+.DS_Store
+.pytest_cache/

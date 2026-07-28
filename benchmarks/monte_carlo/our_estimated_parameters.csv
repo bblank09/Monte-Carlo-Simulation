@@ -1,0 +1,6 @@
+asset,expected_return_pct,expected_volatility_pct,weight_pct
+M0027_2535,-5.88,16.39,0.0
+M0209_2548,-1.73,18.78,0.0
+QQQ,17.06,24.95,100.0
+SPY,12.14,20.53,0.0
+TLT,-7.20,16.83,0.0
