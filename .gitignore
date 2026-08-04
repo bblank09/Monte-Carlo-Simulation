@@ -10,3 +10,5 @@ webull_data_sdk.log
 .venv/
 .DS_Store
 .pytest_cache/
+
+.worktrees/
