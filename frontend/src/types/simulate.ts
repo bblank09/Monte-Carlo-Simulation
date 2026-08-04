@@ -21,7 +21,7 @@ export interface SimulateRequest {
   degrees_of_freedom?: number;
   expected_return?: number;
   expected_volatility?: number;
-  cashflow_mode: "none" | "contribute" | "withdraw_fixed" | "withdraw_percent";
+  cashflow_mode: "none" | "contribute" | "withdraw_fixed" | "withdraw_percent" | "rolling_average_spending" | "geometric_spending" | "withdraw_life_expectancy";
   cashflow_amount?: number;
   cashflow_inflation_adjusted?: boolean;
   cashflow_frequency?: "monthly" | "quarterly" | "annually";

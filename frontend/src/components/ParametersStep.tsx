@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { SimulateRequest, NamedGoal } from "../types/simulate";
+import type { SimulateRequest, NamedGoal, FundSummary, Holding } from "../types/simulate";
 
 interface Props {
   active: boolean;
@@ -7,9 +7,10 @@ interface Props {
   onChange: (value: SimulateRequest) => void;
   onBack: () => void;
   onContinue: () => void;
+  funds: FundSummary[];
 }
 
-export function ParametersStep({ active, value, onChange, onBack, onContinue }: Props) {
+export function ParametersStep({ active, value, onChange, onBack, onContinue, funds }: Props) {
   const [multiGoal, setMultiGoal] = useState(value.multi_goal_enabled);
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
@@ -245,6 +246,9 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue }: 
                 <option value="contribute">Contribute fixed amount periodically</option>
                 <option value="withdraw_fixed">Withdraw fixed amount periodically</option>
                 <option value="withdraw_percent">Withdraw fixed percentage periodically</option>
+                <option value="rolling_average_spending">Rolling average spending rule</option>
+                <option value="geometric_spending">Geometric spending rule</option>
+                <option value="withdraw_life_expectancy">Withdraw based on life expectancy</option>
               </select>
             </div>
             {value.cashflow_mode !== "none" && (
@@ -290,6 +294,43 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue }: 
           </div>
         ) : (
           <GoalsTable goals={value.goals ?? []} onChange={(goals) => patch({ goals })} />
+        )}
+
+        {/* ===== Multistage Planning (when multi-goal enabled) ===== */}
+        {multiGoal && (
+          <>
+            <div className="section-title" style={{ marginTop: 20 }}>Multistage Planning</div>
+            <div className="form-grid">
+              <div className="form-field">
+                <label htmlFor="years_to_retirement">Years to Retirement</label>
+                <input
+                  className="field num"
+                  id="years_to_retirement"
+                  min={1}
+                  type="number"
+                  value={value.years_to_retirement ?? 20}
+                  onChange={(e) => patch({ years_to_retirement: Number(e.target.value) })}
+                />
+              </div>
+              <div className="form-field">
+                <label htmlFor="glide_path_years">Glide Path Years</label>
+                <input
+                  className="field num"
+                  id="glide_path_years"
+                  min={1}
+                  type="number"
+                  value={value.glide_path_years ?? 10}
+                  onChange={(e) => patch({ glide_path_years: Number(e.target.value) })}
+                />
+              </div>
+            </div>
+            <div className="section-title" style={{ marginTop: 20 }}>Retirement Portfolio Allocation</div>
+            <RetirementAllocationTable
+              funds={funds}
+              retirementHoldings={value.retirement_holdings ?? []}
+              onChange={(retirement_holdings) => patch({ retirement_holdings })}
+            />
+          </>
         )}
 
         {/* ===== Inflation & Rebalancing ===== */}
@@ -427,10 +468,139 @@ function GoalsTable({ goals, onChange }: { goals: NamedGoal[]; onChange: (goals:
           <input className="field" type="number" placeholder="Amount" value={goal.amount} onChange={(e) => updateGoal(index, { amount: Number(e.target.value) })} />
           <input className="field" type="number" placeholder="Starts (year)" value={goal.starts_year} onChange={(e) => updateGoal(index, { starts_year: Number(e.target.value) })} />
           <input className="field" type="number" placeholder="Ends (year)" value={goal.ends_year} onChange={(e) => updateGoal(index, { ends_year: Number(e.target.value) })} />
-          <button type="button" onClick={() => removeGoal(index)}>Remove</button>
+          <button className="btn btn-ghost" type="button" onClick={() => removeGoal(index)}>Remove</button>
         </div>
       ))}
       <button type="button" className="link-btn" onClick={addGoal}>+ Add goal</button>
+    </div>
+  );
+}
+
+function RetirementAllocationTable({
+  funds,
+  retirementHoldings,
+  onChange
+}: {
+  funds: FundSummary[];
+  retirementHoldings: Holding[];
+  onChange: (holdings: Holding[]) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+
+  const selectedIds = new Set(retirementHoldings.map((h) => h.proj_id));
+  const filteredFunds = funds.filter((fund) => {
+    if (selectedIds.has(fund.proj_id) && retirementHoldings.some((h) => h.proj_id === fund.proj_id && h.proj_id)) return true;
+    const haystack = `${fund.proj_id} ${fund.proj_name_thai ?? ""}`.toLowerCase();
+    return haystack.includes(query.toLowerCase());
+  });
+
+  function addFund(fund: FundSummary) {
+    const existing = retirementHoldings.find((h) => h.proj_id === fund.proj_id);
+    if (!existing) {
+      onChange([...retirementHoldings, { proj_id: fund.proj_id, weight: 0 }]);
+    }
+    setQuery("");
+    setOpen(false);
+  }
+
+  function removeFund(projId: string) {
+    if (retirementHoldings.length <= 1) return;
+    onChange(retirementHoldings.filter((h) => h.proj_id !== projId));
+  }
+
+  function updateWeight(projId: string, weight: number) {
+    onChange(retirementHoldings.map((h) => (h.proj_id === projId ? { ...h, weight } : h)));
+  }
+
+  const total = retirementHoldings.reduce((sum, h) => sum + (h.weight || 0), 0);
+  const complete = Math.abs(total - 100) < 0.01 && retirementHoldings.length > 0;
+
+  function normalizeWeights() {
+    if (total <= 0) {
+      const share = 100 / retirementHoldings.length;
+      onChange(retirementHoldings.map((h) => ({ ...h, weight: share })));
+      return;
+    }
+    onChange(retirementHoldings.map((h) => ({ ...h, weight: (h.weight / total) * 100 })));
+  }
+
+  function clearWeights() {
+    onChange(retirementHoldings.map((h) => ({ ...h, weight: 0 })));
+  }
+
+  return (
+    <div className="form-grid" style={{ gridColumn: "1 / -1" }}>
+      <div className="holdings-table" style={{ gridColumn: "1 / -1" }}>
+        <div className="holdings-head">
+          <div>Fund</div>
+          <div>Weight %</div>
+          <div></div>
+        </div>
+        {retirementHoldings.map((holding) => {
+          const fund = funds.find((f) => f.proj_id === holding.proj_id);
+          return (
+            <div className="holdings-row" key={holding.proj_id}>
+              <div className="fund-field">
+                <input
+                  className="field fund-input"
+                  value={fund ? (fund.proj_name_thai || fund.proj_id) : ""}
+                  disabled
+                  placeholder="Fund"
+                />
+              </div>
+              <input
+                className="field num"
+                type="number"
+                min={0}
+                max={100}
+                step={0.1}
+                value={holding.weight}
+                onChange={(e) => updateWeight(holding.proj_id, Number(e.target.value))}
+              />
+              <button className="icon-btn" onClick={() => removeFund(holding.proj_id)} type="button">✕</button>
+            </div>
+          );
+        })}
+        <div style={{ position: "relative", gridColumn: "1 / -1" }}>
+          <input
+            className="field fund-input"
+            placeholder="Add fund..."
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+            onFocus={() => setOpen(true)}
+            autoComplete="off"
+          />
+          {open && filteredFunds.length > 0 && (
+            <div className="fund-suggest open">
+              {filteredFunds.map((fund) => (
+                <button
+                  key={fund.proj_id}
+                  className="fund-suggest-item"
+                  onClick={() => addFund(fund)}
+                  type="button"
+                  style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 12px", border: 0, background: "none", cursor: "pointer", fontSize: "13px" }}
+                >
+                  {fund.proj_name_thai || fund.proj_id} <span style={{ display: "block", color: "var(--text-tertiary)", fontSize: "11.5px", marginTop: "2px" }}>{fund.proj_id}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="holdings-foot" style={{ gridColumn: "1 / -1" }}>
+        <div className="holdings-foot-left">
+          <div className="weight-actions">
+            <button className="link-btn" onClick={normalizeWeights} type="button">Normalize to 100%</button>
+            <span aria-hidden="true">&middot;</span>
+            <button className="link-btn" onClick={clearWeights} type="button">Clear</button>
+          </div>
+        </div>
+        <div className="weight-total">
+          Total <span>{(Math.round(total * 10) / 10).toFixed(1)}%</span>
+          <span className={complete ? "pill ok" : "pill warn"}>{complete ? "ready" : "incomplete"}</span>
+        </div>
+      </div>
     </div>
   );
 }

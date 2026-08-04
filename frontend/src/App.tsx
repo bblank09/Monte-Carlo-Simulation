@@ -113,6 +113,7 @@ export function App() {
             onChange={setParams}
             onBack={() => goToStep(0)}
             onContinue={runSimulation}
+            funds={funds}
           />
         )}
         {step === "results" && result && (
