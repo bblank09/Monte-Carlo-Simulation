@@ -43,8 +43,9 @@ reference), but **execute them in this order**:
 7. Task 19 — App shell wiring all 3 steps together, calling `postSimulate()` which
    resolves to a mock fixture
 8. **Checkpoint: full UX/UI is now demoable end-to-end with zero backend code written.**
-   This is the deliverable the user asked for — stop here and review before continuing
-   to Phase 2 unless told to proceed straight through.
+   This is the deliverable the user asked for. **Hard stop — do not start Phase 2 until
+   the user explicitly confirms the mock UI/UX is approved.** See the full checkpoint
+   gate below (after Task 19).
 
 **Phase 2 — Backend engine (build against the schema the mocks already match):**
 9. Tasks 1–13, in original order (project scaffolding → engine promotion → new engine
@@ -2945,11 +2946,17 @@ git commit -m "feat: wire 3-step wizard shell (Portfolio -> Parameters -> Result
 
 ---
 
-**PHASE 1 CHECKPOINT — full UX/UI is complete and demoable against mock data.** Run
+**PHASE 1 CHECKPOINT — HARD STOP, requires explicit user confirmation.** Run
 `npm --prefix frontend run dev`, click through Portfolio → Parameters → Results, and
 confirm all 7 Results sub-tabs render meaningful data for at least 2 different
-`simulation_model` choices. This is the point to pause and review with the user before
-starting Phase 2 (backend engine, Tasks 1–13) unless told to proceed straight through.
+`simulation_model` choices. Then present this to the user for review (e.g. via
+`preview_start`/screenshots) and **wait for their explicit confirmation that the mock
+UI/UX is approved** before starting Phase 2 (backend engine, Tasks 1–13). Do not proceed
+to Phase 2 on your own judgment that Phase 1 "looks done" — the user must say so. If
+they request changes, apply them and re-present before asking again. This gate exists
+because Phase 2 builds the real schema to match what Phase 1 already shipped — locking
+in the UI before backend work starts is the point of the UX/UI-first ordering, and
+skipping the confirmation defeats it.
 
 ---
 
