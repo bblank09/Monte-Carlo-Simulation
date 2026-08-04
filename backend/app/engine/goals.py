@@ -3,12 +3,16 @@ import numpy as np
 
 def apply_cashflow(paths: np.ndarray, initial_amount: float, cashflow: dict) -> np.ndarray:
     """Apply one fixed annual contribution/withdrawal to normalized growth-factor paths,
-    year by year, compounding on the resulting dollar balance each year."""
+    year by year, compounding on the resulting dollar balance each year. `cashflow["amount"]`
+    is a per-occurrence figure, scaled to an annual net cashflow by `cashflow["frequency"]`
+    via `_annualized_goal_amount` -- the same frequency-scaling `apply_named_goals` already
+    applies, so a "monthly" cashflow actually withdraws/contributes 12x its entered amount
+    per year, not 1x."""
     n_paths, n_years_plus_one = paths.shape
     n_years = n_years_plus_one - 1
     growth_factors = paths[:, 1:] / paths[:, :-1]
     sign = -1.0 if cashflow["is_withdrawal"] else 1.0
-    amount = cashflow["amount"]
+    amount = _annualized_goal_amount(cashflow)
     values = np.empty((n_paths, n_years_plus_one))
     values[:, 0] = initial_amount
     for year in range(n_years):

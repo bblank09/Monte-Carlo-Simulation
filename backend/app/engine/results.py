@@ -10,11 +10,22 @@ def _percentile_band(values: np.ndarray) -> dict:
     return {p: float(np.percentile(values, p)) for p in _PCTS}
 
 
+def _safe_period_returns(paths: np.ndarray) -> np.ndarray:
+    """Per-period growth-factor returns, with already-ruined paths (balance floored to
+    exactly 0.0 by apply_cashflow/apply_named_goals) guarded against 0/0 -> NaN. Once a
+    path hits 0 it stays 0 in every subsequent year, so every later period's return would
+    otherwise be NaN and leak into the JSON response (bare NaN is not valid JSON and
+    breaks JSON.parse in the browser). A ruined period contributes 0.0 return instead."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        raw = paths[:, 1:] / paths[:, :-1] - 1
+    return np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0)
+
+
 def percentile_table(paths: np.ndarray, initial_amount: float, inflation_draws: np.ndarray | None = None, growth_only_paths: np.ndarray | None = None) -> dict:
     ending = paths[:, -1] * initial_amount
     n_years = paths.shape[1] - 1
     cagr = paths[:, -1] ** (1 / n_years) - 1
-    per_period_returns = paths[:, 1:] / paths[:, :-1] - 1
+    per_period_returns = _safe_period_returns(paths)
     annual_mean_return = per_period_returns.mean(axis=1)
     annualized_volatility = per_period_returns.std(axis=1)
     # TWRR strips cashflow timing by construction (it's a ratio of period-end to
@@ -115,7 +126,7 @@ def compute_var_es(ending_values: np.ndarray, alpha: float = 0.90) -> tuple[floa
 def sharpe_sortino_by_percentile(paths: np.ndarray, risk_free_rate: float = 0.0) -> dict:
     n_years = paths.shape[1] - 1
     per_path_annual_returns = paths[:, -1] ** (1 / n_years) - 1
-    per_period_returns = paths[:, 1:] / paths[:, :-1] - 1
+    per_period_returns = _safe_period_returns(paths)
     per_path_vol = per_period_returns.std(axis=1) * np.sqrt(1)
     downside = np.where(per_period_returns < 0, per_period_returns, 0.0)
     per_path_downside_vol = np.sqrt((downside ** 2).mean(axis=1))
@@ -131,8 +142,11 @@ def sharpe_sortino_by_percentile(paths: np.ndarray, risk_free_rate: float = 0.0)
 def withdrawal_rates_by_percentile(paths: np.ndarray, n_years: int) -> dict:
     n_paths = paths.shape[0]
     swr = np.empty(n_paths)
+    # +1 shifts a ruined path's (0/0 -> NaN) growth factor to 0.0, matching a fully
+    # depleted balance rather than leaking NaN into brentq / the response.
+    safe_growth_factors = _safe_period_returns(paths) + 1
     for i in range(n_paths):
-        growth_factors = paths[i, 1:] / paths[i, :-1]
+        growth_factors = safe_growth_factors[i]
 
         def final_balance(rate):
             balance = 1.0
@@ -146,7 +160,7 @@ def withdrawal_rates_by_percentile(paths: np.ndarray, n_years: int) -> dict:
             swr[i] = 0.0 if final_balance(1.0) > 0 else 1.0
 
     per_path_annual_returns = paths[:, -1] ** (1 / n_years) - 1
-    per_period_returns = paths[:, 1:] / paths[:, :-1] - 1
+    per_period_returns = _safe_period_returns(paths)
     per_path_vol = per_period_returns.std(axis=1)
     pwr = per_path_annual_returns - 0.5 * per_path_vol ** 2
 

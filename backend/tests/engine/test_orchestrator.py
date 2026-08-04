@@ -77,8 +77,12 @@ def test_multistage_glide_path_request_produces_goals_section_with_glide_path():
     assert "glide_path" in response.goals
     assert response.goals["glide_path"]["years"] == list(range(11))
     allocations = response.goals["glide_path"]["allocations"]
-    # Weight on M0027_2535 must decline from the start allocation (0.60) toward the
-    # retirement allocation (0.20) as the glide path progresses.
+    # Semantics match frontend/src/api/mockData.ts: hold the start allocation (0.60)
+    # steady until years_to_retirement - glide_path_years = 5 - 3 = 2, then transition
+    # linearly so the retirement allocation (0.20) is fully reached exactly AT
+    # years_to_retirement=5, and held there afterward.
     assert allocations["M0027_2535"][0] == 0.6
-    assert allocations["M0027_2535"][3] == 0.2  # fully transitioned by glide_path_years=3
+    assert allocations["M0027_2535"][2] == 0.6  # transition hasn't started yet
+    assert allocations["M0027_2535"][5] == 0.2  # fully transitioned exactly at retirement
+    assert allocations["M0027_2535"][10] == 0.2  # holds steady after retirement
     assert "cashflows_nominal" in response.goals

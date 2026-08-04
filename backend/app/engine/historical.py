@@ -69,7 +69,7 @@ def _apply_sequence_of_returns_risk(sampled: np.ndarray, worst_n: int) -> np.nda
     for p in range(sampled.shape[0]):
         row = sampled[p]
         worst_idx = np.argsort(row)[:worst_n]
-        rest_idx = np.array([i for i in range(n_years) if i not in set(worst_idx)])
+        rest_idx = np.array([i for i in range(n_years) if i not in set(worst_idx)], dtype=int)
         worst_sorted = row[worst_idx][np.argsort(row[worst_idx])]
         reordered[p] = np.concatenate([worst_sorted, row[rest_idx]])
     return reordered

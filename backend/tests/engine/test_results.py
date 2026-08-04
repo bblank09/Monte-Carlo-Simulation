@@ -97,6 +97,44 @@ def test_survival_series_starts_at_one_and_is_monotonic_or_equal():
     assert np.all(series >= 0) and np.all(series <= 1)
 
 
+def _ruined_paths(seed=0, n_paths=200, n_years=10, ruin_frac=0.7):
+    """Normalized growth-factor paths where a large fraction hit exactly 0.0 partway
+    through and stay there -- simulating portfolio ruin from an aggressive cashflow
+    (apply_cashflow/apply_named_goals floor a depleted balance to exactly 0.0)."""
+    rng = np.random.default_rng(seed)
+    annual = rng.normal(0.06, 0.15, size=(n_paths, n_years))
+    growth = np.cumprod(1 + annual, axis=1)
+    paths = np.hstack([np.ones((n_paths, 1)), growth])
+    n_ruined = int(n_paths * ruin_frac)
+    ruin_year = n_years // 2
+    paths[:n_ruined, ruin_year:] = 0.0
+    return paths
+
+
+def test_percentile_table_no_nan_when_many_paths_are_ruined():
+    paths = _ruined_paths()
+    table = percentile_table(paths, initial_amount=1000.0)
+    for metric in table.values():
+        for value in metric.values():
+            assert not np.isnan(value), f"NaN leaked into percentile_table: {metric}"
+
+
+def test_withdrawal_rates_by_percentile_no_nan_when_many_paths_are_ruined():
+    paths = _ruined_paths()
+    result = withdrawal_rates_by_percentile(paths, n_years=paths.shape[1] - 1)
+    for band in result.values():
+        for value in band.values():
+            assert not np.isnan(value), f"NaN leaked into withdrawal_rates_by_percentile: {band}"
+
+
+def test_sharpe_sortino_by_percentile_no_nan_when_many_paths_are_ruined():
+    paths = _ruined_paths()
+    result = sharpe_sortino_by_percentile(paths)
+    for band in result.values():
+        for value in band.values():
+            assert not np.isnan(value), f"NaN leaked into sharpe_sortino_by_percentile: {band}"
+
+
 def test_correlation_and_returns_table_shape():
     idx = pd.date_range("2020-01-01", periods=500, freq="B")
     rng = np.random.default_rng(2)

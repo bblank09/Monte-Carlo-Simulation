@@ -7,7 +7,7 @@ from backend.app.engine.forecasted import simulate_forecasted
 from backend.app.engine.statistical import simulate_statistical
 from backend.app.engine.parameterized import simulate_parameterized
 from backend.app.engine.inflation import simulate_inflation
-from backend.app.engine.goals import apply_cashflow, apply_named_goals, glide_path_weights, build_cashflow_series
+from backend.app.engine.goals import apply_cashflow, apply_named_goals, build_cashflow_series
 from backend.app.engine.glide_path_orchestration import simulate_with_glide_path
 from backend.app.engine.results import (
     percentile_table, sharpe_sortino_by_percentile, withdrawal_rates_by_percentile,
@@ -133,7 +133,10 @@ def run_simulation(request: SimulateRequest, returns_df: pd.DataFrame) -> Simula
             years_axis = list(range(request.simulation_period_years + 1))
             allocations = {
                 proj_id: [
-                    float(glide_path_weights(weights, retirement_weights, request.glide_path_years, y)[i])
+                    float(_frontend_glide_path_weight(
+                        weights, retirement_weights, request.years_to_retirement,
+                        request.glide_path_years, y,
+                    )[i])
                     for y in years_axis
                 ]
                 for i, proj_id in enumerate(proj_ids)
@@ -145,6 +148,26 @@ def run_simulation(request: SimulateRequest, returns_df: pd.DataFrame) -> Simula
         metrics=metrics, risk=risk, goals=goals_section,
         run_config=request.model_dump(),
     )
+
+
+def _frontend_glide_path_weight(
+    start_weights: np.ndarray, end_weights: np.ndarray,
+    years_to_retirement: int, glide_path_years: int, year: int,
+) -> np.ndarray:
+    """Displayed glide-path allocation for a given year, matching the semantics already
+    shipped in `frontend/src/api/mockData.ts` (the contract the real backend must match,
+    per the plan's zero-component-file-edits constraint): hold the starting allocation
+    steady until `years_to_retirement - glide_path_years`, then transition linearly so
+    the retirement allocation is fully reached exactly AT `years_to_retirement`, and stays
+    there afterward. This is the OPPOSITE of `engine/goals.glide_path_weights` (which
+    starts transitioning at year 0) -- that function is left untouched because
+    `glide_path_orchestration.simulate_with_glide_path` still relies on its year-0-start
+    semantics for the actual path simulation; this helper only drives the *displayed*
+    glide-path allocations returned in the response's `goals.glide_path` section."""
+    if year <= years_to_retirement:
+        progress = min(1.0, (years_to_retirement - year) / glide_path_years)
+        return start_weights * progress + end_weights * (1 - progress)
+    return end_weights
 
 
 def _make_year_simulator(request: SimulateRequest, config: dict, mu, sigma, subset):

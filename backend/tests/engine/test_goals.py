@@ -19,6 +19,21 @@ def test_apply_cashflow_contribution_increases_balance():
     assert values[0, 1] > values[0, 0]
 
 
+def test_apply_cashflow_scales_amount_by_frequency():
+    paths = np.ones((5, 3))
+    monthly = apply_cashflow(paths, initial_amount=1000.0, cashflow={
+        "amount": 10.0, "is_withdrawal": False, "inflation_adjusted": False, "frequency": "monthly",
+    })
+    annual = apply_cashflow(paths, initial_amount=1000.0, cashflow={
+        "amount": 10.0, "is_withdrawal": False, "inflation_adjusted": False, "frequency": "annually",
+    })
+    # A monthly $10 contribution is $120/yr, 12x an annual $10 contribution -- mirrors
+    # test_apply_named_goals_scales_amount_by_frequency for the single-cashflow path.
+    assert np.isclose(monthly[0, 1] - 1000.0, 120.0)
+    assert np.isclose(annual[0, 1] - 1000.0, 10.0)
+    assert monthly[0, -1] > annual[0, -1]
+
+
 def test_apply_named_goals_reports_success_rate():
     paths = np.ones((10, 4))
     goals = [
