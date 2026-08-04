@@ -234,7 +234,7 @@ export function PortfolioStep({ funds, active, onHoldingsChange, onContinue }: P
 
       <div className="actions">
         <span className="footnote">Step 1 of 3 &mdash; portfolio weights must sum to 100%.</span>
-        <button className="btn btn-primary" disabled={!complete} onClick={onContinue} type="button">Continue to Assumptions &rarr;</button>
+        <button className="btn btn-primary" disabled={!complete} onClick={onContinue} type="button">Continue to Parameters &rarr;</button>
       </div>
     </div>
   );
