@@ -70,6 +70,15 @@ export function App() {
     }
   }
 
+  function startOver() {
+    setHoldings([]);
+    setParams(DEFAULT_REQUEST);
+    setResult(null);
+    setError(null);
+    setUnlockedStep(0);
+    setStepIndex(0);
+  }
+
   return (
     <div className="shell">
       <header className="topbar">
@@ -98,9 +107,23 @@ export function App() {
           />
         )}
         {step === "parameters" && (
-          <ParametersStep active value={params} onChange={setParams} onContinue={runSimulation} />
+          <ParametersStep
+            active
+            value={params}
+            onChange={setParams}
+            onBack={() => goToStep(0)}
+            onContinue={runSimulation}
+          />
         )}
-        {step === "results" && result && <ResultsView result={result} />}
+        {step === "results" && result && (
+          <div className="page active">
+            <ResultsView result={result} />
+            <div className="actions">
+              <button className="btn btn-ghost" onClick={() => goToStep(1)} type="button">&larr; Adjust parameters</button>
+              <button className="btn btn-ghost" onClick={startOver} type="button">Start a new portfolio</button>
+            </div>
+          </div>
+        )}
       </div>
 
       <footer className="app-footer">
