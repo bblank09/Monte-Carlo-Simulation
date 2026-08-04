@@ -45,6 +45,15 @@
   --r-md: 10px;
   --r-lg: 14px;
   --r-pill: 999px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 48px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -214,8 +223,8 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .theme-toggle { border: 1px solid var(--border); background: var(--surface); border-radius: var(--r-pill); height: 38px; padding: 0 16px; font-size: 12.5px; font-weight: 600; color: var(--text-secondary); cursor: pointer; display: inline-flex; align-items: center; }
 
 /* ---------- Layout ---------- */
-.main { display: flex; flex-direction: column; align-items: center; padding: 28px 20px 60px; gap: 16px; }
-.page { width: 100%; max-width: 1100px; display: none; flex-direction: column; gap: 24px; animation: fade .3s ease; }
+.main { display: flex; flex-direction: column; align-items: center; padding: var(--space-6) var(--space-5) 60px; gap: var(--space-4); }
+.page { width: 100%; max-width: 1100px; display: none; flex-direction: column; gap: var(--space-6); animation: fade .3s ease; }
 .page.active { display: flex; }
 @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
@@ -233,7 +242,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .page-head h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.015em; margin: 0 0 6px; text-wrap: balance; }
 .page-head p { margin: 0; color: var(--text-secondary); font-size: 14.5px; max-width: 70ch; }
 
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 26px; box-shadow: var(--shadow-xs); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--space-6); box-shadow: var(--shadow-xs); }
 
 /* ---------- Holdings / portfolio builder ---------- */
 .holdings-table { display: flex; flex-direction: column; gap: 10px; }
@@ -279,7 +288,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .goal-row { display: grid; grid-template-columns: 1fr 120px 110px 110px 110px 110px 54px; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); }
 .goal-row input, .goal-row select { border: 1px solid var(--border-strong); border-radius: var(--r-sm); padding: 8px 10px; background: var(--surface); color: var(--text-primary); font-size: 13px; width: 100%; }
 .goal-row input:focus, .goal-row select:focus { outline: none; box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent); border-color: var(--accent); }
-.goal-row button { border: 1px solid var(--border); background: var(--surface); border-radius: var(--r-sm); height: 44px; padding: 0 12px; color: var(--text-tertiary); cursor: pointer; font-size: 13px; transition: background .15s, border-color .15s; }
+.goal-row button { border: 1px solid var(--border); background: var(--surface); border-radius: var(--r-sm); height: 38px; padding: 0 12px; color: var(--text-tertiary); cursor: pointer; font-size: 13px; transition: background .15s, border-color .15s; }
 .goal-row button:hover { background: var(--danger-soft); color: var(--danger); border-color: var(--danger-soft-border); }
 @media (max-width: 900px) { .goal-row { grid-template-columns: 1fr; gap: 8px; } .goal-row input, .goal-row select, .goal-row button { width: 100%; } }
 
@@ -362,10 +371,10 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .obj-card .preview { margin-top: auto; font-size: 11.5px; color: var(--text-tertiary); border-top: 1px dashed var(--border); padding-top: 8px; }
 
 /* ---------- Assumptions ---------- */
-.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 20px; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4) var(--space-5); }
 @media (max-width: 620px) { .form-grid { grid-template-columns: 1fr; } }
 .form-field label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; color: var(--text-secondary); }
-.section-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-tertiary); margin: 4px 0 12px; }
+.section-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-tertiary); margin: var(--space-1) 0 var(--space-3); }
 .advanced-toggle {
   display: flex; align-items: center; gap: 8px; cursor: pointer;
   font-size: 13px; font-weight: 600; color: var(--text-primary);
@@ -497,7 +506,7 @@ p, small { color: var(--text-secondary); }
 
 .tabStack { display: grid; gap: 18px; }
 
-.metricGrid, .alwaysOnGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin: 4px 0; }
+.metricGrid, .alwaysOnGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-4); margin: var(--space-1) 0; }
 
 .metricCard {
   appearance: none; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md);
@@ -568,7 +577,7 @@ p, small { color: var(--text-secondary); }
 
 .tableScroller { max-height: 420px; overflow: auto; border-radius: var(--r-sm); box-shadow: inset -8px 0 8px -8px rgba(0, 0, 0, 0.15); }
 .compactTable .tableScroller { max-height: 260px; }
-.tables { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
+.tables { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); margin-top: var(--space-4); }
 .tables.oneColumn { grid-template-columns: 1fr; }
 
 table { width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 8px; font-size: 13px; font-variant-numeric: tabular-nums; }
@@ -615,6 +624,8 @@ th { position: sticky; top: 0; background: var(--surface); color: var(--text-ter
 @media (max-width: 640px) {
   .metricGrid, .alwaysOnGrid { grid-template-columns: 1fr; }
   .monthHeaders, .heatRow { grid-template-columns: 44px repeat(12, 38px); overflow-x: auto; }
+  .main { padding-left: var(--space-4); padding-right: var(--space-4); }
+  .card { padding: var(--space-4); }
 }
 
 /* ---------- Print (Report tab -> "Print / Save PDF") ---------- */
