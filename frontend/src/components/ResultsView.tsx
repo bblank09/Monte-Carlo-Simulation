@@ -227,14 +227,29 @@ interface DistributionData {
 
 function DistributionTab({ result }: { result: SimulateResponse }) {
   const distribution = result.distribution as unknown as DistributionData;
-  const bins = buildHistogramBins(distribution.ending_balance_histogram, 30, money);
+  const runConfig = result.run_config as unknown as { initial_amount?: number };
+  const initial = runConfig.initial_amount || 1;
+  // Histogram's x-axis label (charts.tsx) always formats `row.from` as a
+  // percentage — that's fine for fraction-scale data (drawdown) but was the
+  // real cause of the overflow for ending balances: dollar-scale `from`
+  // values (hundreds of thousands to tens of millions) ran through percent
+  // formatting produced labels like "735,345.61%" — dozens of characters
+  // wide, wider than any bin count could keep readable. Converting ending
+  // balance to total return (ending / initial - 1) puts `from` back on the
+  // same small-fraction scale the component's built-in label formatter
+  // expects, producing short labels like "175.3%".
+  const endingReturns = distribution.ending_balance_histogram.map((v) => v / initial - 1);
+  // 20 bins keeps the rotated axis labels (9.5px, -40deg, white-space: nowrap)
+  // readable at typical card widths without overlapping their neighbors —
+  // 30 was too dense and bled labels off the card's right edge.
+  const bins = buildHistogramBins(endingReturns, 20, (v) => pctString(v, 1));
   const drawdownBins = distribution.max_drawdown_histogram
-    ? buildHistogramBins(distribution.max_drawdown_histogram, 30, (v) => pctString(v, 1))
+    ? buildHistogramBins(distribution.max_drawdown_histogram, 20, (v) => pctString(v, 1))
     : [];
   return (
     <div className="card">
       <h2>Distribution</h2>
-      <p>Distribution of the simulated portfolio's ending balance across all paths.</p>
+      <p>Distribution of the simulated portfolio's total return (ending balance vs. initial amount) across all paths.</p>
       <Histogram rows={bins} />
       {drawdownBins.length ? (
         <>

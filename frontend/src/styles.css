@@ -562,8 +562,8 @@ th { position: sticky; top: 0; background: var(--surface); color: var(--text-ter
 .histSwatch-gain { background: #137a4f; }
 .histSwatch-loss { background: repeating-linear-gradient(135deg, #b42318, #b42318 3px, #7a170f 3px, #7a170f 6px); }
 
-.hist { display: flex; align-items: end; gap: 4px; min-height: 140px; }
-.histCol { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-width: 0; }
+.hist { display: flex; align-items: end; gap: 4px; min-height: 140px; overflow-x: auto; padding-bottom: 4px; }
+.histCol { flex: 1 0 28px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-width: 28px; }
 .histCount { font-size: 10px; font-weight: 700; color: var(--text-secondary); margin-bottom: 3px; font-variant-numeric: tabular-nums; }
 .histBar { width: 100%; min-height: 5px; border-radius: 3px 3px 0 0; }
 .histBar-gain { background: #137a4f; }
