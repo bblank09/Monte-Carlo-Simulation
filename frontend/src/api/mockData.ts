@@ -1,5 +1,4 @@
-import type { FundSummary } from "./client";
-import type { SimulateRequest, SimulateResponse } from "../types/simulate";
+import type { FundSummary, SimulateRequest, SimulateResponse } from "../types/simulate";
 
 export const mockFunds: FundSummary[] = [
   { proj_id: "M0027_2535", proj_name_thai: "K หุ้นทุน", amc_name_thai: "บลจ.กสิกรไทย" },

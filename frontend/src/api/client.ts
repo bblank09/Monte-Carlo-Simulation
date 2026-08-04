@@ -1,4 +1,4 @@
-import type { SimulateRequest, SimulateResponse } from "../types/simulate";
+import type { FundSummary, SimulateRequest, SimulateResponse } from "../types/simulate";
 import { mockFunds, mockSimulateResponse } from "./mockData";
 
 const API_BASE = "/api";
@@ -24,12 +24,6 @@ export async function postSimulate(request: SimulateRequest): Promise<SimulateRe
     throw new Error(`simulate failed: ${resp.status} ${body}`);
   }
   return resp.json();
-}
-
-export interface FundSummary {
-  proj_id: string;
-  proj_name_thai?: string;
-  amc_name_thai?: string;
 }
 
 export async function getFunds(): Promise<FundSummary[]> {
