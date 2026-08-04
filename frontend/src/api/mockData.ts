@@ -57,13 +57,13 @@ export function mockSimulateResponse(request: SimulateRequest): SimulateResponse
     cagr: Object.fromEntries(PERCENTILES.map((p) => [p, Math.pow(fanChart[String(p)][years] / initial, 1 / years) - 1])),
   };
 
-  const survivedCount = Math.round(500 * survivalOverTime[years]);
+  const survivedCount = Math.round(request.n_paths * survivalOverTime[years]);
 
   const response: SimulateResponse = {
     overview: {
       n_paths: request.n_paths,
       survived_count: survivedCount,
-      survival_rate: survivedCount / 500,
+      survival_rate: survivedCount / request.n_paths,
       median_ending_balance: percentileTable.ending_balance[50],
       median_cagr: percentileTable.cagr[50],
       holdings: request.holdings,
