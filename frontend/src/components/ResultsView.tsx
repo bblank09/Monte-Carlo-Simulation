@@ -332,10 +332,10 @@ function ReportTab({ result }: { result: SimulateResponse }) {
       <h2>Report</h2>
       <p>Export this simulation run for records or further analysis.</p>
       <div className="stat-row">
-        <button type="button" onClick={downloadJson}>
+        <button type="button" className="btn btn-ghost" onClick={downloadJson}>
           Export run_config.json
         </button>
-        <button type="button" onClick={downloadFullResult}>
+        <button type="button" className="btn btn-ghost" onClick={downloadFullResult}>
           Export full result (JSON)
         </button>
       </div>
