@@ -17,6 +17,48 @@
 - Project directory name contains `:` (`Monte Carlo Simulation Webull:SEC OPENAI`) — Docker must use a **named volume**, never a bind mount.
 - No chart library in the frontend — hand-built SVG components only, matching Backtest Portfolio's convention.
 - `tsc -b && vite build` is both the build and the frontend typecheck step.
+- **The frontend must be built and fully usable against mock data before any backend
+  task starts**, and must require zero component-file edits when the real backend is
+  wired in at the end — only a mock-switch flag changes (see Execution Order below).
+
+## Execution Order (revised — UX/UI-first)
+
+Originally numbered Tasks 1–22 were written backend-first. Build order is now
+**frontend-first against mocked data, backend engine second, one wiring task last**.
+Task numbers below are unchanged (so file paths/interfaces stay consistent to cross-
+reference), but **execute them in this order**:
+
+**Phase 1 — Full UX/UI on mock data (do this first, entirely):**
+1. Task 14 — Frontend scaffold (design tokens, Stepper, RunOverlay, `api/client.ts`
+   built with a mock switch from the start — see Task 14 Step 4a, added below)
+2. Task 14b — Mock data fixtures (`mockFunds.ts`, `mockSimulateResponses.ts`) — **new
+   task**, inserted after Task 14
+3. Task 15 — Chart primitives (ported from Backtest Portfolio, no backend dependency)
+4. Task 16 — Portfolio step (ported; fund list sourced from `mockFunds.ts` via
+   `getFunds()`, not a live endpoint)
+5. Task 17 — Parameters step (pure form state, no backend dependency)
+6. Task 18 — Results view, 7 sub-tabs (rendered entirely from
+   `mockSimulateResponses.ts` fixtures — every tab, every chart, every table must be
+   visibly complete and correct against mock data)
+7. Task 19 — App shell wiring all 3 steps together, calling `postSimulate()` which
+   resolves to a mock fixture
+8. **Checkpoint: full UX/UI is now demoable end-to-end with zero backend code written.**
+   This is the deliverable the user asked for — stop here and review before continuing
+   to Phase 2 unless told to proceed straight through.
+
+**Phase 2 — Backend engine (build against the schema the mocks already match):**
+9. Tasks 1–13, in original order (project scaffolding → engine promotion → new engine
+   modules → schemas → orchestrator → FastAPI). `SimulateRequest`/`SimulateResponse`
+   (Task 10) MUST match the shape already hard-coded into `mockSimulateResponses.ts` —
+   Task 10's self-review step now includes diffing the Pydantic schema field names
+   against the mock fixture field names, not just against the frontend TS types.
+
+**Phase 3 — Wire and ship:**
+10. Task 19b — Wire real backend (**new task**, inserted after Task 19/before Task 20)
+    — flips the mock switch off. No component files change.
+11. Task 20 — Docker
+12. Task 21 — E2E test (now runs against the real backend, not mocks)
+13. Task 22 — Delete superseded `tests/*.py` source
 
 ---
 
@@ -1925,14 +1967,25 @@ cp "../Backtest Portfolio Webull:SEC OPENAI/frontend/src/components/RunOverlay.t
 ```
 Read the copied `Stepper.tsx`, find its step-label array/props, and change the labels to match this project's 3 steps.
 
-- [ ] **Step 4: Write `frontend/src/api/client.ts`** (hand-mirrored types, no codegen — same convention as Backtest Portfolio)
+- [ ] **Step 4: Write `frontend/src/api/client.ts`** (hand-mirrored types, no codegen — same convention as Backtest Portfolio). **Built with a mock switch from day one** so Phase 2 (real backend) plugs in without touching any component: every component calls `postSimulate`/`getFunds` from this file only, never `fetch` directly, so this file is the single place Phase 3's wiring task touches.
 
 ```typescript
 import type { SimulateRequest, SimulateResponse } from "../types/simulate";
+import { mockFunds, mockSimulateResponse } from "./mockData";
 
 const API_BASE = "/api";
 
+// USE_MOCK is the single switch between Phase 1 (UX/UI on mock data) and Phase 3
+// (real backend wired in). Flip via VITE_USE_MOCK=false in .env.local, or the Task 19b
+// wiring step removes the mock branch entirely once the backend is ready. No component
+// that imports postSimulate/getFunds needs to change either way.
+const USE_MOCK = import.meta.env.VITE_USE_MOCK !== "false";
+
 export async function postSimulate(request: SimulateRequest): Promise<SimulateResponse> {
+  if (USE_MOCK) {
+    await new Promise((resolve) => setTimeout(resolve, 600)); // simulate network latency for RunOverlay
+    return mockSimulateResponse(request);
+  }
   const resp = await fetch(`${API_BASE}/simulate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1952,10 +2005,19 @@ export interface FundSummary {
 }
 
 export async function getFunds(): Promise<FundSummary[]> {
+  if (USE_MOCK) return mockFunds;
   const resp = await fetch(`${API_BASE}/funds`);
   if (!resp.ok) throw new Error(`funds fetch failed: ${resp.status}`);
   return resp.json();
 }
+```
+
+- [ ] **Step 4a: Add `VITE_USE_MOCK=true` to `frontend/.env.local`** (gitignored — this is a
+local dev toggle, not committed config) so Phase 1 development runs against mocks by
+default without needing a backend running at all.
+
+```bash
+echo "VITE_USE_MOCK=true" > frontend/.env.local
 ```
 
 - [ ] **Step 5: Write `frontend/src/main.tsx`** (standard Vite React entrypoint)
@@ -1982,8 +2044,149 @@ Expected: fails only on the missing `App.tsx` import (expected — created in Ta
 - [ ] **Step 7: Commit**
 
 ```bash
-git add frontend/package.json frontend/tsconfig.json frontend/vite.config.ts frontend/index.html frontend/src/main.tsx frontend/src/styles.css frontend/src/components/Stepper.tsx frontend/src/components/RunOverlay.tsx frontend/src/api/client.ts
+git add frontend/package.json frontend/tsconfig.json frontend/vite.config.ts frontend/index.html frontend/src/main.tsx frontend/src/styles.css frontend/src/components/Stepper.tsx frontend/src/components/RunOverlay.tsx frontend/src/api/client.ts frontend/.gitignore
 git commit -m "feat: copy frontend scaffold and design tokens from Backtest Portfolio"
+```
+
+---
+
+## Task 14b: Mock data fixtures
+
+**Files:**
+- Create: `frontend/src/api/mockData.ts`
+
+**Interfaces:**
+- Consumes: `FundSummary`, `SimulateRequest`, `SimulateResponse` types (defined in Task 16's `types/simulate.ts` — since this task's fixtures must match those types exactly, write this task's file *after* Task 16's types file exists, even though it's listed here for Phase-1 ordering purposes; the actual file-creation order is: Task 14 → Task 16's `types/simulate.ts` → this task → the rest of Task 16 → Task 15/17/18/19).
+- Produces: `mockFunds: FundSummary[]` (5 realistic SEC fund entries), `mockSimulateResponse(request: SimulateRequest): SimulateResponse` (a deterministic, realistic response generator — not random noise — so every Results sub-tab has meaningful, inspectable numbers during Phase 1 UI review).
+
+**This is the task that makes "full UI, ready for backend, no changes needed" concrete.**
+The mock generator's output shape must be byte-for-byte identical to what Task 10's real
+`SimulateResponse` Pydantic model will later produce — every key `ResultsView.tsx` reads
+in Task 18 must already exist here.
+
+- [ ] **Step 1: Write `frontend/src/api/mockData.ts`**
+
+```typescript
+import type { FundSummary } from "./client";
+import type { SimulateRequest, SimulateResponse } from "../types/simulate";
+
+export const mockFunds: FundSummary[] = [
+  { proj_id: "M0027_2535", proj_name_thai: "K หุ้นทุน", amc_name_thai: "บลจ.กสิกรไทย" },
+  { proj_id: "M0209_2548", proj_name_thai: "K SET50", amc_name_thai: "บลจ.กสิกรไทย" },
+  { proj_id: "M0088_2540", proj_name_thai: "ไทยพาณิชย์หุ้นทุน", amc_name_thai: "บลจ.ไทยพาณิชย์" },
+  { proj_id: "M0154_2544", proj_name_thai: "บัวหลวงตราสารหนี้", amc_name_thai: "บลจ.บัวหลวง" },
+  { proj_id: "M0301_2551", proj_name_thai: "กรุงศรีตราสารหนี้ระยะสั้น", amc_name_thai: "บลจ.กรุงศรี" },
+];
+
+const PERCENTILES = [10, 25, 50, 75, 90] as const;
+
+// A fixed pseudo-random generator (mulberry32) so every call with the same request
+// produces the same fixture — reviewers should see stable numbers, not flicker on
+// re-render.
+function seededRandom(seed: number) {
+  let t = seed;
+  return () => {
+    t += 0x6d2b79f5;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export function mockSimulateResponse(request: SimulateRequest): SimulateResponse {
+  const rand = seededRandom(request.seed ?? 42);
+  const years = request.simulation_period_years;
+  const initial = request.initial_amount;
+
+  // Median annual return/vol vary slightly by model so the mock visibly reacts to the
+  // Parameters step, without pretending to be a real simulation.
+  const baseReturn = request.simulation_model === "parameterized" ? (request.expected_return ?? 0.07) : 0.075;
+  const baseVol = request.simulation_model === "parameterized" ? (request.expected_volatility ?? 0.15) : 0.14;
+
+  const fanChart: Record<string, number[]> = {};
+  for (const p of PERCENTILES) {
+    const drift = baseReturn + (p - 50) / 1000; // higher percentiles drift up
+    const path = [initial];
+    for (let y = 1; y <= years; y++) {
+      path.push(path[y - 1] * (1 + drift + (rand() - 0.5) * 0.01));
+    }
+    fanChart[String(p)] = path;
+  }
+
+  const survivalOverTime = Array.from({ length: years + 1 }, (_, y) =>
+    Math.max(0.7, 1 - y * (0.002 + baseVol / 500))
+  );
+
+  const endingBalances = Array.from({ length: 500 }, () => {
+    const z = (rand() + rand() + rand() - 1.5) * 2; // roughly normal-ish via CLT
+    return Math.max(0, initial * Math.exp(baseReturn * years + baseVol * Math.sqrt(years) * z * 0.3));
+  });
+
+  const percentileTable = {
+    ending_balance: Object.fromEntries(PERCENTILES.map((p) => [p, fanChart[String(p)][years]])),
+    cagr: Object.fromEntries(PERCENTILES.map((p) => [p, Math.pow(fanChart[String(p)][years] / initial, 1 / years) - 1])),
+  };
+
+  const survivedCount = Math.round(500 * survivalOverTime[years]);
+
+  const response: SimulateResponse = {
+    overview: {
+      n_paths: request.n_paths,
+      survived_count: survivedCount,
+      survival_rate: survivedCount / 500,
+      median_ending_balance: percentileTable.ending_balance[50],
+      median_cagr: percentileTable.cagr[50],
+      holdings: request.holdings,
+    },
+    growth: {
+      fan_chart: fanChart,
+      survival_over_time: survivalOverTime,
+    },
+    distribution: {
+      ending_balance_histogram: endingBalances,
+    },
+    metrics: {
+      percentile_table: percentileTable,
+      sharpe: Object.fromEntries(PERCENTILES.map((p) => [p, 0.3 + (p - 10) / 200])),
+      sortino: Object.fromEntries(PERCENTILES.map((p) => [p, 0.45 + (p - 10) / 180])),
+      safe_withdrawal_rate: Object.fromEntries(PERCENTILES.map((p) => [p, 0.03 + (p - 10) / 2000])),
+      perpetual_withdrawal_rate: Object.fromEntries(PERCENTILES.map((p) => [p, 0.025 + (p - 10) / 2500])),
+    },
+    risk: {
+      correlation_and_returns: {
+        correlation: Object.fromEntries(
+          request.holdings.map((a) => [
+            a.proj_id,
+            Object.fromEntries(request.holdings.map((b) => [b.proj_id, a.proj_id === b.proj_id ? 1 : 0.3])),
+          ])
+        ),
+        stats: Object.fromEntries(
+          request.holdings.map((h) => [h.proj_id, { cagr: 0.08, expected_return: 0.09, volatility: 0.18 }])
+        ),
+      },
+      value_at_risk: initial * 0.18,
+      expected_shortfall: initial * 0.24,
+    },
+    goals: request.multi_goal_enabled
+      ? { summary: (request.goals ?? []).map((g) => ({ purpose: g.purpose, success_rate: 0.94 })) }
+      : null,
+    run_config: request as unknown as Record<string, unknown>,
+  };
+
+  return response;
+}
+```
+
+- [ ] **Step 2: Verify the file builds standalone**
+
+Run: `npm --prefix frontend run build`
+Expected: no TypeScript errors in `mockData.ts` once `types/simulate.ts` (Task 16) exists — if this task runs before Task 16's types file, expect an import error here that resolves once Task 16 lands; note this ordering dependency and proceed to Task 16 next if so.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add frontend/src/api/mockData.ts
+git commit -m "feat: add deterministic mock SimulateResponse fixtures for UI-first development"
 ```
 
 ---
@@ -2742,6 +2945,64 @@ git commit -m "feat: wire 3-step wizard shell (Portfolio -> Parameters -> Result
 
 ---
 
+**PHASE 1 CHECKPOINT — full UX/UI is complete and demoable against mock data.** Run
+`npm --prefix frontend run dev`, click through Portfolio → Parameters → Results, and
+confirm all 7 Results sub-tabs render meaningful data for at least 2 different
+`simulation_model` choices. This is the point to pause and review with the user before
+starting Phase 2 (backend engine, Tasks 1–13) unless told to proceed straight through.
+
+---
+
+## Task 19b: Wire real backend (Phase 3 — run only after Phase 2/Tasks 1–13 are done)
+
+**Files:**
+- Modify: `frontend/.env.local` (or delete it)
+- Modify: `frontend/e2e/happy-path.spec.ts` (if it stubbed responses for Phase 1 — see Task 21)
+
+**Interfaces:**
+- Consumes: the real `POST /api/simulate` and `GET /api/funds` endpoints (Task 12–13).
+- Produces: no new component code. This task's entire point is that **zero files under
+  `frontend/src/components/` or `frontend/src/App.tsx` change** — only the mock switch
+  flips.
+
+- [ ] **Step 1: Set the dev-time override off** (or delete the file so the code's own
+  default takes over — `client.ts`'s `USE_MOCK` defaults to `true` only via the env var;
+  removing the override makes production builds real-backend by default since
+  `VITE_USE_MOCK` won't be set at all, and `!== "false"` evaluates true only when the
+  var IS set to something other than "false" — **fix this default before Phase 3**: flip
+  the comparison in `client.ts` from `!== "false"` to `=== "true"` in this step so an
+  *unset* env var means real backend, matching production behavior.)
+
+Modify `frontend/src/api/client.ts`:
+```typescript
+// Before (Phase 1 default: mock unless explicitly disabled)
+const USE_MOCK = import.meta.env.VITE_USE_MOCK !== "false";
+// After (Phase 3 default: real backend unless explicitly enabled for local dev)
+const USE_MOCK = import.meta.env.VITE_USE_MOCK === "true";
+```
+
+- [ ] **Step 2: Start both servers and manually verify one full run against the real backend**
+
+Run: `uvicorn backend.app.main:app --reload` (separate terminal)
+Run: `npm --prefix frontend run dev`
+
+Click through Portfolio (real fund search hitting `/api/funds`) → Parameters → Results
+(real `/api/simulate` call). Confirm every Results sub-tab that worked against mock data
+in the Phase 1 checkpoint still renders correctly against real numbers — if any tab
+breaks, the mismatch is between `mockData.ts`'s fixture shape and the real
+`SimulateResponse` schema (Task 10), not a UI bug; fix the mismatch in whichever side is
+wrong (prefer fixing `mockData.ts` to match the real schema, since the schema is the
+contract).
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add frontend/src/api/client.ts
+git commit -m "feat: wire real backend, flip mock-switch default to off"
+```
+
+---
+
 ## Task 20: Docker
 
 **Files:**
@@ -2866,10 +3127,14 @@ test("build a portfolio, run a historical simulation, and see results", async ({
 }
 ```
 
-- [ ] **Step 4: Run the e2e test** (requires both the backend and frontend dev servers running, or the Playwright config's `webServer` block starting them automatically — check the copied config)
+- [ ] **Step 4: Run the e2e test.** In Phase 1 (before backend exists) this only needs the
+frontend dev server — `USE_MOCK` is on by default, so `/api/simulate` never gets hit and
+the test validates UI flow only. Re-run it again in Phase 3 after Task 19b flips the
+mock switch off, with both the backend and frontend dev servers running, to confirm the
+same spec now passes against real data with no spec changes.
 
 Run: `npm --prefix frontend run test:e2e`
-Expected: PASS
+Expected: PASS (both in Phase 1 against mocks, and again in Phase 3 against the real backend)
 
 - [ ] **Step 5: Commit**
 
