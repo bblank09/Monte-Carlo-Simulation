@@ -8,9 +8,10 @@ interface Props {
   onBack: () => void;
   onContinue: () => void;
   funds: FundSummary[];
+  running?: boolean;
 }
 
-export function ParametersStep({ active, value, onChange, onBack, onContinue, funds }: Props) {
+export function ParametersStep({ active, value, onChange, onBack, onContinue, funds, running = false }: Props) {
   const [multiGoal, setMultiGoal] = useState(value.multi_goal_enabled);
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
@@ -441,7 +442,15 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
       {/* ===== Actions ===== */}
       <div className="actions">
         <button className="btn btn-ghost" onClick={onBack} type="button">&larr; Back</button>
-        <button className="btn btn-primary" onClick={onContinue} type="button">Continue to Results &rarr;</button>
+        <button className="btn btn-primary" disabled={running} onClick={onContinue} type="button">
+          {running ? (
+            <>
+              <span className="spinner" /> Running&hellip;
+            </>
+          ) : (
+            <>Continue to Results &rarr;</>
+          )}
+        </button>
       </div>
     </div>
   );

@@ -70,6 +70,10 @@ export function App() {
     }
   }
 
+  function retrySimulation() {
+    void runSimulation();
+  }
+
   function startOver() {
     setHoldings([]);
     setParams(DEFAULT_REQUEST);
@@ -94,7 +98,21 @@ export function App() {
       </header>
 
       <div className="main">
-        {error && <div className="banner danger">{error}</div>}
+        {error && (
+          <div className="banner danger">
+            <span className="ic">&#9888;</span>
+            <div className="banner-body">
+              <p className="banner-message">We couldn&rsquo;t run the simulation. Please try again.</p>
+              <details className="banner-detail">
+                <summary>Technical details</summary>
+                <span>{error}</span>
+              </details>
+              <button className="btn btn-ghost btn-sm" onClick={retrySimulation} type="button">
+                Try again
+              </button>
+            </div>
+          </div>
+        )}
         {step === "portfolio" && (
           <PortfolioStep
             funds={funds}
@@ -114,6 +132,7 @@ export function App() {
             onBack={() => goToStep(0)}
             onContinue={runSimulation}
             funds={funds}
+            running={running}
           />
         )}
         {step === "results" && result && (
