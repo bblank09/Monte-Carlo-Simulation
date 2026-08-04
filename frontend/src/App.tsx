@@ -52,6 +52,7 @@ export function App() {
   const [stepIndex, setStepIndex] = useState(initialSession?.stepIndex ?? 0);
   const [unlockedStep, setUnlockedStep] = useState(initialSession?.unlockedStep ?? 0);
   const [funds, setFunds] = useState<FundSummary[]>([]);
+  const [fundsLoading, setFundsLoading] = useState(true);
   const [holdings, setHoldings] = useState<Holding[]>(initialSession?.holdings ?? []);
   const [params, setParams] = useState<SimulateRequest>(initialSession?.params ?? DEFAULT_REQUEST);
   const [result, setResult] = useState<SimulateResponse | null>(null);
@@ -67,7 +68,8 @@ export function App() {
   useEffect(() => {
     getFunds()
       .then(setFunds)
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load funds"));
+      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load funds"))
+      .finally(() => setFundsLoading(false));
   }, []);
 
   useEffect(() => {
@@ -144,6 +146,7 @@ export function App() {
         {step === "portfolio" && (
           <PortfolioStep
             funds={funds}
+            fundsLoading={fundsLoading}
             active
             onHoldingsChange={setHoldings}
             onContinue={() => {

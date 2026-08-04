@@ -33,6 +33,7 @@ function buildFacets(funds: FundSummary[], field: "amc_name_thai") {
 
 interface Props {
   funds: FundSummary[];
+  fundsLoading?: boolean;
   active: boolean;
   onHoldingsChange: (holdings: Holding[]) => void;
   onContinue: () => void;
@@ -46,7 +47,7 @@ function nextKey() {
   return `row-${rowSeq}`;
 }
 
-export function PortfolioStep({ funds, active, onHoldingsChange, onContinue }: Props) {
+export function PortfolioStep({ funds, fundsLoading = false, active, onHoldingsChange, onContinue }: Props) {
   const [rows, setRows] = useState<Row[]>([{ key: nextKey(), projId: "", weight: 0, query: "" }]);
   const [amcFilter, setAmcFilter] = useState<Set<string>>(new Set());
   const seededRef = useRef(false);
@@ -186,31 +187,44 @@ export function PortfolioStep({ funds, active, onHoldingsChange, onContinue }: P
           <button className="link-btn" onClick={loadExample} type="button">Load an example portfolio</button>
         </div>
 
-        <div className="holdings-table">
-          <div className="holdings-head">
-            <div>SEC Fund</div>
-            <div>Weight %</div>
-            <div />
+        {fundsLoading && funds.length === 0 ? (
+          <div className="holdings-table" aria-busy="true" aria-label="Loading funds">
+            <div className="holdings-head">
+              <div>SEC Fund</div>
+              <div>Weight %</div>
+              <div />
+            </div>
+            <div className="skeleton skeleton-pulse" style={{ height: 44, borderRadius: "var(--r-sm)" }} />
+            <div className="skeleton skeleton-pulse" style={{ height: 44, borderRadius: "var(--r-sm)" }} />
+            <div className="skeleton skeleton-pulse" style={{ height: 44, borderRadius: "var(--r-sm)" }} />
           </div>
-          {rows.map((row) => (
-            <HoldingsRow
-              key={row.key}
-              row={row}
-              funds={filteredFunds}
-              allFunds={funds}
-              selectedIds={selectedIds}
-              canRemove={rows.length > 1}
-              amcFacets={amcFacets}
-              amcFilter={amcFilter}
-              onToggleAmc={toggleAmcFilter}
-              onClearFilters={clearAllFilters}
-              onSelect={(fund) => selectFund(row.key, fund)}
-              onQueryChange={(query) => setQuery(row.key, query)}
-              onWeightChange={(weight) => setWeight(row.key, weight)}
-              onRemove={() => removeRow(row.key)}
-            />
-          ))}
-        </div>
+        ) : (
+          <div className="holdings-table">
+            <div className="holdings-head">
+              <div>SEC Fund</div>
+              <div>Weight %</div>
+              <div />
+            </div>
+            {rows.map((row) => (
+              <HoldingsRow
+                key={row.key}
+                row={row}
+                funds={filteredFunds}
+                allFunds={funds}
+                selectedIds={selectedIds}
+                canRemove={rows.length > 1}
+                amcFacets={amcFacets}
+                amcFilter={amcFilter}
+                onToggleAmc={toggleAmcFilter}
+                onClearFilters={clearAllFilters}
+                onSelect={(fund) => selectFund(row.key, fund)}
+                onQueryChange={(query) => setQuery(row.key, query)}
+                onWeightChange={(weight) => setWeight(row.key, weight)}
+                onRemove={() => removeRow(row.key)}
+              />
+            ))}
+          </div>
+        )}
 
         <div className="holdings-foot">
           <div className="holdings-foot-left">

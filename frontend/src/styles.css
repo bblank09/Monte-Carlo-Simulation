@@ -163,6 +163,17 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
 }
 
+/* ---------- Skeleton loading state ---------- */
+.skeleton { background: var(--gray-100); }
+.skeleton-pulse { animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-pulse { animation: none; opacity: 0.75; }
+}
+
 * { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 *::-webkit-scrollbar { width: 8px; height: 8px; }
 *::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: var(--r-pill); border: 2px solid transparent; background-clip: padding-box; }
@@ -638,5 +649,12 @@ th { position: sticky; top: 0; background: var(--surface); color: var(--text-ter
   .page { max-width: none; }
   .resultShell, .reportPanel, .chartPanel, .tablePanel { box-shadow: none; border: 1px solid #ccc; break-inside: avoid; }
   .tableScroller { max-height: none; overflow: visible; }
+  .metricGrid, .alwaysOnGrid, .tables {
+    display: block;
+  }
+  .metricGrid > *, .alwaysOnGrid > *, .tables > * {
+    break-inside: avoid;
+    margin-bottom: 10px;
+  }
   body { background: #fff; color: #000; }
 }

@@ -113,6 +113,7 @@ function OverviewTab({ result }: { result: SimulateResponse }) {
     label: h.proj_id,
     weight: h.weight,
   }));
+  const lowSurvival = overview.survival_rate < 0.5;
   return (
     <div className="card">
       <h2>Overview</h2>
@@ -132,7 +133,7 @@ function OverviewTab({ result }: { result: SimulateResponse }) {
           <span>Median CAGR</span>
           <strong>{(overview.median_cagr * 100).toFixed(2)}%</strong>
         </div>
-        <div className="metricCard">
+        <div className={lowSurvival ? "metricCard metricCard-negative" : "metricCard metricCard-positive"}>
           <span>Survival Rate</span>
           <strong>{(overview.survival_rate * 100).toFixed(2)}%</strong>
         </div>
@@ -141,6 +142,17 @@ function OverviewTab({ result }: { result: SimulateResponse }) {
           <strong>{overview.n_paths.toLocaleString()}</strong>
         </div>
       </div>
+      {lowSurvival ? (
+        <div className="banner danger">
+          <span className="ic">&#9888;</span>
+          <div className="banner-body">
+            <p className="banner-message">
+              This plan has a high risk of running out of money before the end of the simulation period &mdash;
+              consider adjusting your withdrawal amount, initial portfolio, or asset allocation.
+            </p>
+          </div>
+        </div>
+      ) : null}
       <h3>Portfolio Allocation</h3>
       <AllocationPie slices={slices} />
       <h3>Portfolio Holdings</h3>
