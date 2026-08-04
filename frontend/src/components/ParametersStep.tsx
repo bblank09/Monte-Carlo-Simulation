@@ -20,7 +20,12 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
 
   function toggleMultiGoal(enabled: boolean) {
     setMultiGoal(enabled);
-    patch({ multi_goal_enabled: enabled, goals: enabled ? (value.goals ?? []) : undefined });
+    patch({
+      multi_goal_enabled: enabled,
+      goals: enabled ? (value.goals ?? []) : undefined,
+      years_to_retirement: enabled ? (value.years_to_retirement ?? 20) : undefined,
+      glide_path_years: enabled ? (value.glide_path_years ?? 10) : undefined,
+    });
   }
 
   const goalsSummary = multiGoal && value.goals && value.goals.length > 0
