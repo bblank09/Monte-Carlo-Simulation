@@ -45,6 +45,11 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
   if (value.simulation_period_years < 5 || value.simulation_period_years > 75) {
     fieldErrors.simulation_period_years = "Simulation period must be between 5 and 75 years.";
   }
+  if (value.n_paths > 20000) {
+    fieldErrors.n_paths = "Number of paths cannot exceed 20,000.";
+  } else if (value.n_paths < 1000) {
+    fieldErrors.n_paths = "Fewer than 1,000 paths gives statistically unreliable percentile estimates.";
+  }
 
   function fieldError(field: string): string | null {
     return touched[field] ? (fieldErrors[field] ?? null) : null;
@@ -417,10 +422,13 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
                 className="field num"
                 id="n_paths"
                 min={1}
+                max={20000}
                 type="number"
                 value={value.n_paths}
                 onChange={(e) => patch({ n_paths: Number(e.target.value) })}
+                onBlur={() => markTouched("n_paths")}
               />
+              {fieldError("n_paths") && <div className="field-error">{fieldError("n_paths")}</div>}
             </div>
             {value.simulation_model === "historical" && (
               <>
@@ -512,7 +520,17 @@ function GoalsTable({ goals, onChange }: { goals: NamedGoal[]; onChange: (goals:
     <div className="goals-table">
       {goals.map((goal, index) => (
         <div className="goal-row" key={index}>
-          <input className="field" placeholder="Purpose" value={goal.purpose} onChange={(e) => updateGoal(index, { purpose: e.target.value })} />
+          <input
+            className="field"
+            placeholder="Purpose"
+            maxLength={60}
+            value={goal.purpose}
+            onChange={(e) => updateGoal(index, { purpose: e.target.value })}
+            onBlur={() => {
+              const trimmed = goal.purpose.trim();
+              if (trimmed !== goal.purpose) updateGoal(index, { purpose: trimmed });
+            }}
+          />
           <select className="field" value={goal.is_withdrawal ? "withdraw" : "contribute"}
             onChange={(e) => updateGoal(index, { is_withdrawal: e.target.value === "withdraw" })}>
             <option value="contribute">Contribute</option>
