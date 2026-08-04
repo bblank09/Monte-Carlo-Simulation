@@ -299,7 +299,12 @@ function metricsSection(metrics: MetricsData): TableSection {
   const columns = ["metric", ...pcts.map((p) => `${p}th Percentile`)];
   const pt = metrics.percentile_table;
   return {
-    title: "Performance Summary",
+    // Empty on purpose: every call site already renders its own heading
+    // ("Metrics" / "4. Performance results") immediately before this
+    // table, so DataTable's internal <h3>{title}</h3> would duplicate it.
+    // The accessible name is passed separately via each call site's
+    // `caption` prop instead.
+    title: "",
     columns,
     rows: [
       ["Ending Balance", ...pcts.map((p) => money(pt.ending_balance[p]))],
@@ -321,7 +326,7 @@ function MetricsTab({ result }: { result: SimulateResponse }) {
   return (
     <div className="card">
       <h2>Metrics</h2>
-      <DataTable section={metricsSection(metrics)} />
+      <DataTable caption="Performance Summary" section={metricsSection(metrics)} />
     </div>
   );
 }
@@ -345,7 +350,9 @@ interface RiskData {
 
 function expectedReturnByHorizonSection(data: Record<string, Record<string, number>>): TableSection {
   return {
-    title: "Expected Annual Return by Horizon",
+    // Empty on purpose — see metricsSection's comment: RiskTab already
+    // renders an <h3> immediately before this table.
+    title: "",
     columns: ["percentile", ...HORIZON_YEARS.map((h) => `${h}yr`)],
     rows: PERCENTILE_KEYS.map((p) => [`${p}th`, ...HORIZON_YEARS.map((h) => pctString(data[h]?.[p] ?? 0))]),
   };
@@ -354,7 +361,7 @@ function expectedReturnByHorizonSection(data: Record<string, Record<string, numb
 function annualReturnProbabilitySection(data: Record<string, Record<string, number>>): TableSection {
   const thresholdLabels = Object.keys(data);
   return {
-    title: "Annual Return Probability",
+    title: "",
     columns: ["threshold", ...HORIZON_YEARS.map((h) => `${h}yr`)],
     rows: thresholdLabels.map((label) => [
       `>= ${label}`,
@@ -366,7 +373,7 @@ function annualReturnProbabilitySection(data: Record<string, Record<string, numb
 function lossProbabilitySection(data: RiskData["loss_probability"]): TableSection {
   const thresholdLabels = Object.keys(data.excluding_cashflows.within_period);
   return {
-    title: "Loss Probability",
+    title: "",
     columns: [
       "threshold",
       "Excl. Cashflows — Within",
@@ -388,7 +395,9 @@ function RiskTab({ result }: { result: SimulateResponse }) {
   const risk = result.risk as unknown as RiskData;
   const ids = Object.keys(risk.correlation_and_returns.correlation);
   const statsSection: TableSection = {
-    title: "Per-Holding Statistics",
+    // Empty on purpose — RiskTab already renders an <h3> immediately
+    // before this table.
+    title: "",
     columns: ["holding", "cagr", "expected_return", "volatility"],
     rows: ids.map((id) => {
       const s = risk.correlation_and_returns.stats[id];
@@ -411,23 +420,29 @@ function RiskTab({ result }: { result: SimulateResponse }) {
       <h3>Correlation Matrix</h3>
       <CorrelationMatrix ids={ids} correlation={risk.correlation_and_returns.correlation} />
       <h3>Per-Holding Statistics</h3>
-      <DataTable section={statsSection} />
+      <DataTable caption="Per-Holding Statistics" section={statsSection} />
       {risk.expected_return_by_horizon ? (
         <>
           <h3>Expected Annual Return by Horizon</h3>
-          <DataTable section={expectedReturnByHorizonSection(risk.expected_return_by_horizon)} />
+          <DataTable
+            caption="Expected Annual Return by Horizon"
+            section={expectedReturnByHorizonSection(risk.expected_return_by_horizon)}
+          />
         </>
       ) : null}
       {risk.annual_return_probability ? (
         <>
           <h3>Annual Return Probability</h3>
-          <DataTable section={annualReturnProbabilitySection(risk.annual_return_probability)} />
+          <DataTable
+            caption="Annual Return Probability"
+            section={annualReturnProbabilitySection(risk.annual_return_probability)}
+          />
         </>
       ) : null}
       {risk.loss_probability ? (
         <>
           <h3>Loss Probability</h3>
-          <DataTable section={lossProbabilitySection(risk.loss_probability)} />
+          <DataTable caption="Loss Probability" section={lossProbabilitySection(risk.loss_probability)} />
         </>
       ) : null}
     </div>
@@ -713,7 +728,7 @@ function ReportTab({ result }: { result: SimulateResponse }) {
         </ReportSection>
 
         <ReportSection title="4. Performance results">
-          <DataTable caption="Performance results" section={metricsSection(metrics)} />
+          <DataTable caption="Performance Summary" section={metricsSection(metrics)} />
         </ReportSection>
 
         <ReportSection title="5. Risk analysis">
