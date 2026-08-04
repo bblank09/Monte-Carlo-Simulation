@@ -1,5 +1,19 @@
 import { useState } from "react";
+import { Info } from "lucide-react";
 import type { SimulateRequest, NamedGoal, FundSummary, Holding } from "../types/simulate";
+
+const SIMULATION_MODEL_HELP = "Controls how randomness is generated: Historical replays real past returns, Forecasted and Statistical simulate returns from a time-series model, and Parameterized draws from a distribution you define directly.";
+const BOOTSTRAP_MODEL_HELP = "Determines how chunks of historical returns are resampled to build each simulated path (by single month, single year, or multi-year block).";
+const SEQUENCE_OF_RETURNS_RISK_HELP = "Front-loads the worst historical years so you can see how a bad early sequence of returns affects the outcome.";
+const TIME_SERIES_MODEL_HELP = "Normal assumes constant volatility over time; GARCH lets volatility cluster and change, closer to real market behavior.";
+
+function InfoTip({ text }: { text: string }) {
+  return (
+    <span className="info-icon" title={text}>
+      <Info aria-hidden="true" size={13} />
+    </span>
+  );
+}
 
 interface Props {
   active: boolean;
@@ -14,9 +28,26 @@ interface Props {
 export function ParametersStep({ active, value, onChange, onBack, onContinue, funds, running = false }: Props) {
   const [multiGoal, setMultiGoal] = useState(value.multi_goal_enabled);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
 
   function patch(fields: Partial<SimulateRequest>) {
     onChange({ ...value, ...fields });
+  }
+
+  function markTouched(field: string) {
+    setTouched((current) => ({ ...current, [field]: true }));
+  }
+
+  const fieldErrors: Record<string, string> = {};
+  if (value.initial_amount <= 0) {
+    fieldErrors.initial_amount = "Initial amount must be greater than 0.";
+  }
+  if (value.simulation_period_years < 5 || value.simulation_period_years > 75) {
+    fieldErrors.simulation_period_years = "Simulation period must be between 5 and 75 years.";
+  }
+
+  function fieldError(field: string): string | null {
+    return touched[field] ? (fieldErrors[field] ?? null) : null;
   }
 
   function toggleMultiGoal(enabled: boolean) {
@@ -53,7 +84,9 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
               type="number"
               value={value.initial_amount}
               onChange={(e) => patch({ initial_amount: Number(e.target.value) })}
+              onBlur={() => markTouched("initial_amount")}
             />
+            {fieldError("initial_amount") && <div className="field-error">{fieldError("initial_amount")}</div>}
           </div>
           <div className="form-field">
             <label htmlFor="simulation_period_years">Simulation Period in Years</label>
@@ -66,7 +99,9 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
               type="number"
               value={value.simulation_period_years}
               onChange={(e) => patch({ simulation_period_years: Number(e.target.value) })}
+              onBlur={() => markTouched("simulation_period_years")}
             />
+            {fieldError("simulation_period_years") && <div className="field-error">{fieldError("simulation_period_years")}</div>}
           </div>
           <div className="form-field">
             <label htmlFor="tax_treatment">Tax Treatment</label>
@@ -81,7 +116,7 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
             </select>
           </div>
           <div className="form-field">
-            <label htmlFor="simulation_model">Simulation Model</label>
+            <label htmlFor="simulation_model" className="label-with-info">Simulation Model <InfoTip text={SIMULATION_MODEL_HELP} /></label>
             <select
               className="field"
               id="simulation_model"
@@ -113,33 +148,6 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
                   <option value="no">No</option>
                 </select>
               </div>
-              <div className="form-field">
-                <label htmlFor="bootstrap_model">Bootstrap Model</label>
-                <select
-                  className="field"
-                  id="bootstrap_model"
-                  value={value.bootstrap_model ?? "single_year"}
-                  onChange={(e) => patch({ bootstrap_model: e.target.value as SimulateRequest["bootstrap_model"] })}
-                >
-                  <option value="single_month">Single Month</option>
-                  <option value="single_year">Single Year</option>
-                  <option value="block_of_years">Block of Years</option>
-                </select>
-              </div>
-              <div className="form-field">
-                <label htmlFor="sequence_of_returns_risk">Sequence of Returns Risk</label>
-                <select
-                  className="field"
-                  id="sequence_of_returns_risk"
-                  value={value.sequence_of_returns_risk ?? 0}
-                  onChange={(e) => patch({ sequence_of_returns_risk: Number(e.target.value) })}
-                >
-                  <option value={0}>No Adjustments</option>
-                  {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
-                    <option key={n} value={n}>Worst {n} Year{n > 1 ? "s" : ""} First</option>
-                  ))}
-                </select>
-              </div>
             </div>
           </>
         )}
@@ -150,7 +158,7 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
             <div className="section-title" style={{ marginTop: 20 }}>Time Series Model</div>
             <div className="form-grid">
               <div className="form-field">
-                <label htmlFor="time_series_model">Model Type</label>
+                <label htmlFor="time_series_model" className="label-with-info">Model Type <InfoTip text={TIME_SERIES_MODEL_HELP} /></label>
                 <select
                   className="field"
                   id="time_series_model"
@@ -225,14 +233,14 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
         <div className="section-title" style={{ marginTop: 20 }}>Cashflow &amp; Goals</div>
         <div className="form-grid">
           <div className="form-field">
-            <label htmlFor="multi_goal">Advanced: multiple goals</label>
+            <label htmlFor="multi_goal">Cashflow mode</label>
             <select
               className="field"
               id="multi_goal"
               value={multiGoal ? "yes" : "no"}
               onChange={(e) => toggleMultiGoal(e.target.value === "yes")}
             >
-              <option value="no">Single cashflow</option>
+              <option value="no">Single withdrawal</option>
               <option value="yes">Multiple goals</option>
             </select>
           </div>
@@ -414,18 +422,49 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
                 onChange={(e) => patch({ n_paths: Number(e.target.value) })}
               />
             </div>
-            {value.simulation_model === "historical" && value.bootstrap_model === "block_of_years" && (
-              <div className="form-field">
-                <label htmlFor="block_years">Block Size (years)</label>
-                <input
-                  className="field num"
-                  id="block_years"
-                  min={1}
-                  type="number"
-                  value={value.block_years ?? 1}
-                  onChange={(e) => patch({ block_years: Number(e.target.value) })}
-                />
-              </div>
+            {value.simulation_model === "historical" && (
+              <>
+                <div className="form-field">
+                  <label htmlFor="bootstrap_model" className="label-with-info">Bootstrap Model <InfoTip text={BOOTSTRAP_MODEL_HELP} /></label>
+                  <select
+                    className="field"
+                    id="bootstrap_model"
+                    value={value.bootstrap_model ?? "single_year"}
+                    onChange={(e) => patch({ bootstrap_model: e.target.value as SimulateRequest["bootstrap_model"] })}
+                  >
+                    <option value="single_month">Single Month</option>
+                    <option value="single_year">Single Year</option>
+                    <option value="block_of_years">Block of Years</option>
+                  </select>
+                </div>
+                <div className="form-field">
+                  <label htmlFor="sequence_of_returns_risk" className="label-with-info">Sequence of Returns Risk <InfoTip text={SEQUENCE_OF_RETURNS_RISK_HELP} /></label>
+                  <select
+                    className="field"
+                    id="sequence_of_returns_risk"
+                    value={value.sequence_of_returns_risk ?? 0}
+                    onChange={(e) => patch({ sequence_of_returns_risk: Number(e.target.value) })}
+                  >
+                    <option value={0}>No Adjustments</option>
+                    {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                      <option key={n} value={n}>Worst {n} Year{n > 1 ? "s" : ""} First</option>
+                    ))}
+                  </select>
+                </div>
+                {value.bootstrap_model === "block_of_years" && (
+                  <div className="form-field">
+                    <label htmlFor="block_years">Block Size (years)</label>
+                    <input
+                      className="field num"
+                      id="block_years"
+                      min={1}
+                      type="number"
+                      value={value.block_years ?? 1}
+                      onChange={(e) => patch({ block_years: Number(e.target.value) })}
+                    />
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
