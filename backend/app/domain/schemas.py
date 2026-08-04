@@ -57,7 +57,7 @@ class SimulateRequest(BaseModel):
     multi_goal_enabled: bool = False
     goals: Optional[list[NamedGoal]] = None
     years_to_retirement: Optional[int] = None
-    glide_path_years: Optional[int] = None
+    glide_path_years: Optional[int] = Field(default=None, ge=1)
     retirement_holdings: Optional[list[Holding]] = None
 
     # Inflation

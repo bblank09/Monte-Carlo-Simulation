@@ -65,13 +65,33 @@ def test_apply_named_goals_scales_amount_by_frequency():
     assert np.isclose(values_annual[0, 1] - 1000.0, 10.0)
 
 
-def test_glide_path_interpolates_linearly_then_clamps():
+def test_glide_path_holds_then_transitions_to_retirement_year():
+    # Matches frontend/src/api/mockData.ts's shipped semantics: hold the start
+    # allocation steady until years_to_retirement - glide_path_years, then transition
+    # linearly so the retirement allocation is fully reached exactly AT
+    # years_to_retirement, holding there afterward.
     start = np.array([0.8, 0.2])
     end = np.array([0.2, 0.8])
-    mid = glide_path_weights(start, end, glide_path_years=10, year=5)
-    assert np.allclose(mid, [0.5, 0.5])
-    after = glide_path_weights(start, end, glide_path_years=10, year=15)
-    assert np.allclose(after, end)
+    # years_to_retirement=10, glide_path_years=4 -> transition window is [6, 10].
+    before_window = glide_path_weights(start, end, years_to_retirement=10, glide_path_years=4, year=3)
+    assert np.allclose(before_window, start)
+    window_start = glide_path_weights(start, end, years_to_retirement=10, glide_path_years=4, year=6)
+    assert np.allclose(window_start, start)
+    midpoint = glide_path_weights(start, end, years_to_retirement=10, glide_path_years=4, year=8)
+    assert np.allclose(midpoint, [0.5, 0.5])
+    at_retirement = glide_path_weights(start, end, years_to_retirement=10, glide_path_years=4, year=10)
+    assert np.allclose(at_retirement, end)
+    after_retirement = glide_path_weights(start, end, years_to_retirement=10, glide_path_years=4, year=15)
+    assert np.allclose(after_retirement, end)
+
+
+def test_glide_path_years_zero_is_degenerate_and_returns_end_weights():
+    start = np.array([0.8, 0.2])
+    end = np.array([0.2, 0.8])
+    # A 0-year glide path is a degenerate/meaningless transition window; guarded so it
+    # can't raise ZeroDivisionError -- treated as "already fully transitioned."
+    result = glide_path_weights(start, end, years_to_retirement=5, glide_path_years=0, year=0)
+    assert np.allclose(result, end)
 
 
 def test_build_cashflow_series_nominal_only_without_inflation():

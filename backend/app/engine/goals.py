@@ -67,11 +67,28 @@ def apply_named_goals(paths: np.ndarray, initial_amount: float, goals: list[dict
     return values, summary
 
 
-def glide_path_weights(start_weights: np.ndarray, end_weights: np.ndarray, glide_path_years: int, year: int) -> np.ndarray:
-    if year >= glide_path_years:
+def glide_path_weights(
+    start_weights: np.ndarray, end_weights: np.ndarray,
+    years_to_retirement: int, glide_path_years: int, year: int,
+) -> np.ndarray:
+    """Single source of truth for the glide-path allocation at a given year, used both by
+    `glide_path_orchestration.simulate_with_glide_path` (drives the actual per-year
+    simulation) and by `orchestrator.py`'s displayed `goals.glide_path` chart data --
+    having both call this one function is what guarantees the chart the user sees can
+    never drift from the allocation the simulation actually used.
+
+    Matches the schedule already shipped in `frontend/src/api/mockData.ts`: hold the
+    starting allocation steady until `years_to_retirement - glide_path_years`, then
+    transition linearly so the retirement allocation is fully reached exactly AT
+    `years_to_retirement`, holding there afterward. `glide_path_years <= 0` is a
+    degenerate input (no transition window) and is treated as already fully
+    transitioned."""
+    if glide_path_years <= 0:
         return end_weights
-    t = year / glide_path_years
-    return start_weights * (1 - t) + end_weights * t
+    if year <= years_to_retirement:
+        progress = min(1.0, (years_to_retirement - year) / glide_path_years)
+        return start_weights * progress + end_weights * (1 - progress)
+    return end_weights
 
 
 def build_cashflow_series(paths: np.ndarray, initial_amount: float, goals: list[dict], inflation_draws: np.ndarray | None = None) -> dict:

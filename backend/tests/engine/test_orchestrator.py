@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 from backend.app.domain.schemas import SimulateRequest, Holding
 from backend.app.engine.orchestrator import run_simulation
 
@@ -86,3 +87,15 @@ def test_multistage_glide_path_request_produces_goals_section_with_glide_path():
     assert allocations["M0027_2535"][5] == 0.2  # fully transitioned exactly at retirement
     assert allocations["M0027_2535"][10] == 0.2  # holds steady after retirement
     assert "cashflows_nominal" in response.goals
+
+    # Regression: the displayed chart and the actual simulation must use the exact same
+    # weight-at-year formula (engine.goals.glide_path_weights), so they can never
+    # disagree -- cross-check the displayed values directly against that shared function
+    # rather than against a second, independently-maintained formula.
+    from backend.app.engine.goals import glide_path_weights
+    start_weights = np.array([0.6, 0.4])
+    retirement_weights = np.array([0.2, 0.8])
+    for y in [0, 2, 3, 4, 5, 10]:
+        expected = glide_path_weights(start_weights, retirement_weights, years_to_retirement=5, glide_path_years=3, year=y)
+        assert allocations["M0027_2535"][y] == pytest.approx(expected[0])
+        assert allocations["M0209_2548"][y] == pytest.approx(expected[1])

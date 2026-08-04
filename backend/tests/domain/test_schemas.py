@@ -37,6 +37,34 @@ def test_weights_must_sum_to_100():
         )
 
 
+def test_glide_path_years_zero_is_rejected_at_validation_time():
+    # glide_path_years=0 previously reached the engine and raised ZeroDivisionError
+    # (HTTP 500) inside the glide-path weight formula. A 0-year glide path is a
+    # degenerate/meaningless input, so it's rejected at the schema boundary (422)
+    # instead of being silently handled deep in engine code.
+    with pytest.raises(ValidationError):
+        SimulateRequest(
+            holdings=[Holding(proj_id="M0027_2535", weight=60.0), Holding(proj_id="M0209_2548", weight=40.0)],
+            initial_amount=1_000_000,
+            simulation_period_years=10,
+            tax_treatment="pre_tax",
+            simulation_model="historical",
+            n_paths=1000,
+            seed=42,
+            bootstrap_model="single_year",
+            use_full_history=True,
+            sequence_of_returns_risk=0,
+            rebalancing="annual",
+            inflation_model="historical",
+            multi_goal_enabled=True,
+            goals=[{"purpose": "Retirement", "is_withdrawal": True, "amount": 1000.0,
+                    "inflation_adjusted": False, "frequency": "monthly", "starts_year": 1, "ends_year": 5}],
+            years_to_retirement=5,
+            glide_path_years=0,
+            retirement_holdings=[Holding(proj_id="M0027_2535", weight=20.0), Holding(proj_id="M0209_2548", weight=80.0)],
+        )
+
+
 def test_parameterized_model_requires_expected_return_and_volatility():
     with pytest.raises(ValidationError):
         SimulateRequest(
