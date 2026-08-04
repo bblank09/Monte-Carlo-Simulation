@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Download, ShieldCheck } from "lucide-react";
 import type { SimulateResponse } from "../types/simulate";
 import { AxisCurve, Histogram, CorrelationMatrix, DataTable } from "./charts";
 import type { ChartSeries, HistogramBin, TableSection } from "./charts";
@@ -7,6 +8,23 @@ type ResultsTab = "overview" | "growth" | "distribution" | "metrics" | "risk" | 
 
 interface Props {
   result: SimulateResponse;
+}
+
+const SIMULATION_MODEL_LABELS: Record<string, string> = {
+  historical: "Historical",
+  forecasted: "Forecasted",
+  statistical: "Statistical",
+  parameterized: "Parameterized",
+};
+
+function downloadResultJson(result: SimulateResponse) {
+  const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "simulation_result.json";
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export function ResultsView({ result }: Props) {
@@ -21,20 +39,42 @@ export function ResultsView({ result }: Props) {
   ];
   const [activeTab, setActiveTab] = useState<ResultsTab>("overview");
 
+  const runConfig = result.run_config as unknown as {
+    simulation_model?: string;
+    simulation_period_years?: number;
+  };
+  const modelLabel = SIMULATION_MODEL_LABELS[runConfig.simulation_model ?? ""] ?? "Monte Carlo";
+  const years = runConfig.simulation_period_years;
+
   return (
-    <div className="results-view">
-      <div className="tab-bar">
+    <section className="resultShell" id="report-output">
+      <div className="resultHeader">
+        <div>
+          <span className="sourceLine">
+            <ShieldCheck size={16} /> Simulation result
+          </span>
+          <h2>
+            {modelLabel} model{years ? ` · ${years}-year horizon` : ""}
+          </h2>
+        </div>
+        <button className="secondaryButton" onClick={() => downloadResultJson(result)} type="button">
+          <Download size={16} /> Result JSON
+        </button>
+      </div>
+
+      <nav className="resultTabs" aria-label="Simulation output tabs">
         {tabs.map((tab) => (
           <button
             key={tab.id}
-            className={tab.id === activeTab ? "tab active" : "tab"}
+            className={tab.id === activeTab ? "resultTab active" : "resultTab"}
             onClick={() => setActiveTab(tab.id)}
             type="button"
           >
             {tab.label}
           </button>
         ))}
-      </div>
+      </nav>
+
       {activeTab === "overview" && <OverviewTab result={result} />}
       {activeTab === "growth" && <GrowthTab result={result} />}
       {activeTab === "distribution" && <DistributionTab result={result} />}
@@ -42,7 +82,7 @@ export function ResultsView({ result }: Props) {
       {activeTab === "risk" && <RiskTab result={result} />}
       {activeTab === "goals" && result.goals && <GoalsTab goals={result.goals} />}
       {activeTab === "report" && <ReportTab result={result} />}
-    </div>
+    </section>
   );
 }
 
