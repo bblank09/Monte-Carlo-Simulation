@@ -275,7 +275,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .icon-btn:disabled { opacity: .4; cursor: not-allowed; }
 
 .goals-table { display: flex; flex-direction: column; gap: 10px; }
-.goal-row { display: grid; grid-template-columns: 1fr 120px 110px 110px 110px 54px; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); }
+.goal-row { display: grid; grid-template-columns: 1fr 120px 110px 110px 110px 110px 54px; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); }
 .goal-row input, .goal-row select { border: 1px solid var(--border-strong); border-radius: var(--r-sm); padding: 8px 10px; background: var(--surface); color: var(--text-primary); font-size: 13px; width: 100%; }
 .goal-row input:focus, .goal-row select:focus { outline: none; box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent); border-color: var(--accent); }
 .goal-row button { border: 1px solid var(--border); background: var(--surface); border-radius: var(--r-sm); height: 38px; padding: 0 12px; color: var(--text-tertiary); cursor: pointer; font-size: 13px; transition: background .15s, border-color .15s; }

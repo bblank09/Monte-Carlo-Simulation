@@ -473,6 +473,11 @@ function GoalsTable({ goals, onChange }: { goals: NamedGoal[]; onChange: (goals:
           <input className="field" type="number" placeholder="Amount" value={goal.amount} onChange={(e) => updateGoal(index, { amount: Number(e.target.value) })} />
           <input className="field" type="number" placeholder="Starts (year)" value={goal.starts_year} onChange={(e) => updateGoal(index, { starts_year: Number(e.target.value) })} />
           <input className="field" type="number" placeholder="Ends (year)" value={goal.ends_year} onChange={(e) => updateGoal(index, { ends_year: Number(e.target.value) })} />
+          <select className="field" value={goal.frequency} onChange={(e) => updateGoal(index, { frequency: e.target.value as NamedGoal["frequency"] })}>
+            <option value="monthly">Monthly</option>
+            <option value="quarterly">Quarterly</option>
+            <option value="annually">Annually</option>
+          </select>
           <button className="btn btn-ghost" type="button" onClick={() => removeGoal(index)}>Remove</button>
         </div>
       ))}
