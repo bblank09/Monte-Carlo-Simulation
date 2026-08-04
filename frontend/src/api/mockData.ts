@@ -113,11 +113,27 @@ export function mockSimulateResponse(request: SimulateRequest): SimulateResponse
 
   const percentileTable = {
     ending_balance: Object.fromEntries(PERCENTILES.map((p) => [p, fanChart[String(p)][years]])),
+    ending_balance_real: Object.fromEntries(
+      PERCENTILES.map((p) => {
+        const inflationRate = request.inflation_mean ?? 0.03;
+        return [p, fanChart[String(p)][years] / Math.pow(1 + inflationRate, years)];
+      })
+    ),
     cagr: Object.fromEntries(PERCENTILES.map((p) => [p, Math.pow(fanChart[String(p)][years] / initial, 1 / years) - 1])),
+    annual_mean_return: Object.fromEntries(
+      PERCENTILES.map((p) => {
+        const cagr = Math.pow(fanChart[String(p)][years] / initial, 1 / years) - 1;
+        const spread = 0.005 + baseVol * 0.1; // arithmetic >= geometric, spread proportional to vol
+        return [p, cagr + spread];
+      })
+    ),
     twrr_nominal: Object.fromEntries(PERCENTILES.map((p) => [p, Math.pow(fanChart[String(p)][years] / initial, 1 / years) - 1])), // approximate as CAGR
     twrr_real: Object.fromEntries(PERCENTILES.map((p) => [p, Math.pow(fanChart[String(p)][years] / initial, 1 / years) - 1 - 0.025])), // nominal minus ~2.5% inflation
     max_drawdown: Object.fromEntries(PERCENTILES.map((p) => [p, -0.15 - (90 - p) / 100 * 0.4])), // 10th: -0.55, 50th: -0.30, 90th: -0.15
     max_drawdown_excl_cashflows: Object.fromEntries(PERCENTILES.map((p) => [p, (-0.15 - (90 - p) / 100 * 0.4) * 0.8])), // 80% of magnitude
+    annualized_volatility: Object.fromEntries(
+      PERCENTILES.map((p) => [p, baseVol * (1 + (p - 50) / 50 * 0.25)])
+    ), // 10th: 0.8x baseVol, 50th: baseVol, 90th: 1.2x baseVol
   };
 
   const survivedCount = Math.round(request.n_paths * survivalOverTime[years]);
