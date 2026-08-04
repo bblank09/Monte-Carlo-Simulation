@@ -294,7 +294,10 @@ function buildHistogramBins(
 
 interface PercentileTable {
   ending_balance: Record<string, number>;
+  ending_balance_real: Record<string, number>;
   cagr: Record<string, number>;
+  annual_mean_return: Record<string, number>;
+  annualized_volatility: Record<string, number>;
   twrr_nominal: Record<string, number>;
   twrr_real: Record<string, number>;
   max_drawdown: Record<string, number>;
@@ -322,9 +325,12 @@ function metricsSection(metrics: MetricsData): TableSection {
     title: "",
     columns,
     rows: [
-      ["Ending Balance", ...pcts.map((p) => money(pt.ending_balance[p]))],
       ["TWRR (nominal)", ...pcts.map((p) => pctString(pt.twrr_nominal[p]))],
       ["TWRR (real)", ...pcts.map((p) => pctString(pt.twrr_real[p]))],
+      ["Ending Balance", ...pcts.map((p) => money(pt.ending_balance[p]))],
+      ["Ending Balance (real)", ...pcts.map((p) => money(pt.ending_balance_real[p]))],
+      ["Annual Mean Return", ...pcts.map((p) => pctString(pt.annual_mean_return[p]))],
+      ["Annualized Volatility", ...pcts.map((p) => pctString(pt.annualized_volatility[p]))],
       ["CAGR", ...pcts.map((p) => pctString(pt.cagr[p]))],
       ["Max Drawdown", ...pcts.map((p) => pctString(pt.max_drawdown[p]))],
       ["Max Drawdown (excl. cashflows)", ...pcts.map((p) => pctString(pt.max_drawdown_excl_cashflows[p]))],
