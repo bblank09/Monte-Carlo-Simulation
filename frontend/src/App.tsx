@@ -140,7 +140,7 @@ export function App() {
             <ResultsView result={result} />
             <div className="actions">
               <button className="btn btn-ghost" onClick={() => goToStep(1)} type="button">&larr; Adjust parameters</button>
-              <button className="btn btn-ghost" onClick={startOver} type="button">Start a new portfolio</button>
+              <button className="btn btn-danger" onClick={startOver} type="button">Start a new portfolio</button>
             </div>
           </div>
         )}

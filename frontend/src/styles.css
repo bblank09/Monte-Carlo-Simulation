@@ -236,7 +236,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 
 /* ---------- Holdings / portfolio builder ---------- */
 .holdings-table { display: flex; flex-direction: column; gap: 10px; }
-.holdings-head, .holdings-row { display: grid; grid-template-columns: 1fr 110px 34px; gap: 10px; align-items: center; }
+.holdings-head, .holdings-row { display: grid; grid-template-columns: 1fr 110px 44px; gap: 10px; align-items: center; }
 .holdings-head { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); padding: 0 2px; }
 @media (max-width: 520px) {
   .holdings-head { display: none; }
@@ -268,7 +268,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 
 .icon-btn {
   border: 1px solid var(--border); background: var(--surface); border-radius: var(--r-sm);
-  width: 38px; height: 38px; display: flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;
   cursor: pointer; color: var(--text-tertiary);
 }
 .icon-btn:hover:not(:disabled) { color: var(--danger); border-color: var(--danger-soft-border); background: var(--danger-soft); }
@@ -278,7 +278,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .goal-row { display: grid; grid-template-columns: 1fr 120px 110px 110px 110px 110px 54px; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); }
 .goal-row input, .goal-row select { border: 1px solid var(--border-strong); border-radius: var(--r-sm); padding: 8px 10px; background: var(--surface); color: var(--text-primary); font-size: 13px; width: 100%; }
 .goal-row input:focus, .goal-row select:focus { outline: none; box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent); border-color: var(--accent); }
-.goal-row button { border: 1px solid var(--border); background: var(--surface); border-radius: var(--r-sm); height: 38px; padding: 0 12px; color: var(--text-tertiary); cursor: pointer; font-size: 13px; transition: background .15s, border-color .15s; }
+.goal-row button { border: 1px solid var(--border); background: var(--surface); border-radius: var(--r-sm); height: 44px; padding: 0 12px; color: var(--text-tertiary); cursor: pointer; font-size: 13px; transition: background .15s, border-color .15s; }
 .goal-row button:hover { background: var(--danger-soft); color: var(--danger); border-color: var(--danger-soft-border); }
 @media (max-width: 900px) { .goal-row { grid-template-columns: 1fr; gap: 8px; } .goal-row input, .goal-row select, .goal-row button { width: 100%; } }
 
@@ -405,6 +405,9 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .btn-primary:disabled { background: var(--gray-200); color: var(--text-tertiary); cursor: not-allowed; box-shadow: none; transform: none; }
 .btn-ghost { background: none; color: var(--text-secondary); border: 1px solid var(--border-strong); }
 .btn-ghost:hover { background: var(--surface-2); border-color: var(--border-strong); }
+.btn-danger { background: var(--danger); color: white; border: 1px solid var(--danger); }
+.btn-danger:hover:not(:disabled) { background: var(--danger); box-shadow: 0 4px 12px rgba(180, 35, 24, 0.28); transform: translateY(-1px); }
+.btn-danger:active:not(:disabled) { background: var(--danger); transform: translateY(0); box-shadow: none; }
 .btn:disabled { opacity: .7; cursor: not-allowed; }
 .btn-sm { height: 30px; padding: 0 12px; font-size: 12.5px; }
 
