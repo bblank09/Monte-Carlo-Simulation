@@ -233,8 +233,6 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .page-head p { margin: 0; color: var(--text-secondary); font-size: 14.5px; max-width: 70ch; }
 
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 26px; box-shadow: var(--shadow-xs); }
-.card label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-secondary); margin-bottom: 14px; }
-.card label:last-child { margin-bottom: 0; }
 
 /* ---------- Holdings / portfolio builder ---------- */
 .holdings-table { display: flex; flex-direction: column; gap: 10px; }

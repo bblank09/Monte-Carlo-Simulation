@@ -5,15 +5,26 @@ interface Props {
   active: boolean;
   value: SimulateRequest;
   onChange: (value: SimulateRequest) => void;
+  onBack: () => void;
   onContinue: () => void;
 }
 
-export function ParametersStep({ active, value, onChange, onContinue }: Props) {
+export function ParametersStep({ active, value, onChange, onBack, onContinue }: Props) {
   const [multiGoal, setMultiGoal] = useState(value.multi_goal_enabled);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   function patch(fields: Partial<SimulateRequest>) {
     onChange({ ...value, ...fields });
   }
+
+  function toggleMultiGoal(enabled: boolean) {
+    setMultiGoal(enabled);
+    patch({ multi_goal_enabled: enabled, goals: enabled ? (value.goals ?? []) : undefined });
+  }
+
+  const goalsSummary = multiGoal && value.goals && value.goals.length > 0
+    ? `${value.goals.length} goal${value.goals.length !== 1 ? "s" : ""}`
+    : "single cashflow mode";
 
   return (
     <div className={active ? "page active" : "page"}>
@@ -23,200 +34,369 @@ export function ParametersStep({ active, value, onChange, onContinue }: Props) {
       </div>
 
       <div className="card">
-        <h2>Core</h2>
-        <label>
-          Initial Amount
-          <input className="field" type="number" value={value.initial_amount}
-            onChange={(e) => patch({ initial_amount: Number(e.target.value) })} />
-        </label>
-        <label>
-          Simulation Period in Years
-          <input className="field" type="number" min={5} max={75} step={5} value={value.simulation_period_years}
-            onChange={(e) => patch({ simulation_period_years: Number(e.target.value) })} />
-        </label>
-        <label>
-          Tax Treatment
-          <select className="field" value={value.tax_treatment} onChange={(e) => patch({ tax_treatment: e.target.value as SimulateRequest["tax_treatment"] })}>
-            <option value="pre_tax">Pre-tax Returns</option>
-            <option value="after_tax">After-tax Returns</option>
-          </select>
-        </label>
-        <label>
-          Simulation Model
-          <select className="field" value={value.simulation_model} onChange={(e) => patch({ simulation_model: e.target.value as SimulateRequest["simulation_model"] })}>
-            <option value="historical">Historical Returns</option>
-            <option value="forecasted">Forecasted Returns</option>
-            <option value="statistical">Statistical Returns</option>
-            <option value="parameterized">Parameterized Returns</option>
-          </select>
-        </label>
-      </div>
-
-      {value.simulation_model === "historical" && (
-        <div className="card">
-          <h2>Historical Model Settings</h2>
-          <label>
-            Use Full History
-            <select className="field" value={value.use_full_history ? "yes" : "no"}
-              onChange={(e) => patch({ use_full_history: e.target.value === "yes" })}>
-              <option value="yes">Yes</option>
-              <option value="no">No</option>
+        {/* ===== Core Parameters ===== */}
+        <div className="section-title">Core</div>
+        <div className="form-grid">
+          <div className="form-field">
+            <label htmlFor="initial_amount">Initial Amount</label>
+            <input
+              className="field num"
+              id="initial_amount"
+              min={0}
+              type="number"
+              value={value.initial_amount}
+              onChange={(e) => patch({ initial_amount: Number(e.target.value) })}
+            />
+          </div>
+          <div className="form-field">
+            <label htmlFor="simulation_period_years">Simulation Period in Years</label>
+            <input
+              className="field num"
+              id="simulation_period_years"
+              min={5}
+              max={75}
+              step={5}
+              type="number"
+              value={value.simulation_period_years}
+              onChange={(e) => patch({ simulation_period_years: Number(e.target.value) })}
+            />
+          </div>
+          <div className="form-field">
+            <label htmlFor="tax_treatment">Tax Treatment</label>
+            <select
+              className="field"
+              id="tax_treatment"
+              value={value.tax_treatment}
+              onChange={(e) => patch({ tax_treatment: e.target.value as SimulateRequest["tax_treatment"] })}
+            >
+              <option value="pre_tax">Pre-tax Returns</option>
+              <option value="after_tax">After-tax Returns</option>
             </select>
-          </label>
-          <label>
-            Bootstrap Model
-            <select className="field" value={value.bootstrap_model ?? "single_year"}
-              onChange={(e) => patch({ bootstrap_model: e.target.value as SimulateRequest["bootstrap_model"] })}>
-              <option value="single_month">Single Month</option>
-              <option value="single_year">Single Year</option>
-              <option value="block_of_years">Block of Years</option>
+          </div>
+          <div className="form-field">
+            <label htmlFor="simulation_model">Simulation Model</label>
+            <select
+              className="field"
+              id="simulation_model"
+              value={value.simulation_model}
+              onChange={(e) => patch({ simulation_model: e.target.value as SimulateRequest["simulation_model"] })}
+            >
+              <option value="historical">Historical Returns</option>
+              <option value="forecasted">Forecasted Returns</option>
+              <option value="statistical">Statistical Returns</option>
+              <option value="parameterized">Parameterized Returns</option>
             </select>
-          </label>
-          <label>
-            Sequence of Returns Risk
-            <select className="field" value={value.sequence_of_returns_risk ?? 0}
-              onChange={(e) => patch({ sequence_of_returns_risk: Number(e.target.value) })}>
-              <option value={0}>No Adjustments</option>
-              {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
-                <option key={n} value={n}>Worst {n} Year{n > 1 ? "s" : ""} First</option>
-              ))}
-            </select>
-          </label>
+          </div>
         </div>
-      )}
 
-      {(value.simulation_model === "forecasted" || value.simulation_model === "statistical") && (
-        <div className="card">
-          <h2>Time Series Model</h2>
-          <label>
-            Model Type
-            <select className="field" value={value.time_series_model ?? "normal"}
-              onChange={(e) => patch({ time_series_model: e.target.value as SimulateRequest["time_series_model"] })}>
-              <option value="normal">Normal</option>
-              <option value="garch">GARCH</option>
-            </select>
-          </label>
-        </div>
-      )}
-
-      {value.simulation_model === "parameterized" && (
-        <div className="card">
-          <h2>Parameterized Distribution</h2>
-          <label>
-            Distribution
-            <select className="field" value={value.distribution ?? "normal"}
-              onChange={(e) => patch({ distribution: e.target.value as SimulateRequest["distribution"] })}>
-              <option value="normal">Normal</option>
-              <option value="fat_tailed">Fat-tailed (Student-t)</option>
-            </select>
-          </label>
-          {value.distribution === "fat_tailed" && (
-            <label>
-              Degrees of Freedom
-              <input className="field" type="number" value={value.degrees_of_freedom ?? 5}
-                onChange={(e) => patch({ degrees_of_freedom: Number(e.target.value) })} />
-            </label>
-          )}
-          <label>
-            Expected Return
-            <input className="field" type="number" step="0.01" value={value.expected_return ?? 0}
-              onChange={(e) => patch({ expected_return: Number(e.target.value) })} />
-          </label>
-          <label>
-            Expected Volatility
-            <input className="field" type="number" step="0.01" value={value.expected_volatility ?? 0}
-              onChange={(e) => patch({ expected_volatility: Number(e.target.value) })} />
-          </label>
-        </div>
-      )}
-
-      <div className="card">
-        <h2>Cashflow &amp; Goals</h2>
-        <label>
-          <input type="checkbox" checked={multiGoal}
-            onChange={(e) => { setMultiGoal(e.target.checked); patch({ multi_goal_enabled: e.target.checked }); }} />
-          Advanced: multiple goals
-        </label>
-        {!multiGoal ? (
+        {/* ===== Historical Model Settings ===== */}
+        {value.simulation_model === "historical" && (
           <>
-            <label>
-              Cashflow
-              <select className="field" value={value.cashflow_mode}
-                onChange={(e) => patch({ cashflow_mode: e.target.value as SimulateRequest["cashflow_mode"] })}>
+            <div className="section-title" style={{ marginTop: 20 }}>Historical Model Settings</div>
+            <div className="form-grid">
+              <div className="form-field">
+                <label htmlFor="use_full_history">Use Full History</label>
+                <select
+                  className="field"
+                  id="use_full_history"
+                  value={value.use_full_history ? "yes" : "no"}
+                  onChange={(e) => patch({ use_full_history: e.target.value === "yes" })}
+                >
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </div>
+              <div className="form-field">
+                <label htmlFor="bootstrap_model">Bootstrap Model</label>
+                <select
+                  className="field"
+                  id="bootstrap_model"
+                  value={value.bootstrap_model ?? "single_year"}
+                  onChange={(e) => patch({ bootstrap_model: e.target.value as SimulateRequest["bootstrap_model"] })}
+                >
+                  <option value="single_month">Single Month</option>
+                  <option value="single_year">Single Year</option>
+                  <option value="block_of_years">Block of Years</option>
+                </select>
+              </div>
+              <div className="form-field">
+                <label htmlFor="sequence_of_returns_risk">Sequence of Returns Risk</label>
+                <select
+                  className="field"
+                  id="sequence_of_returns_risk"
+                  value={value.sequence_of_returns_risk ?? 0}
+                  onChange={(e) => patch({ sequence_of_returns_risk: Number(e.target.value) })}
+                >
+                  <option value={0}>No Adjustments</option>
+                  {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                    <option key={n} value={n}>Worst {n} Year{n > 1 ? "s" : ""} First</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ===== Time Series Model ===== */}
+        {(value.simulation_model === "forecasted" || value.simulation_model === "statistical") && (
+          <>
+            <div className="section-title" style={{ marginTop: 20 }}>Time Series Model</div>
+            <div className="form-grid">
+              <div className="form-field">
+                <label htmlFor="time_series_model">Model Type</label>
+                <select
+                  className="field"
+                  id="time_series_model"
+                  value={value.time_series_model ?? "normal"}
+                  onChange={(e) => patch({ time_series_model: e.target.value as SimulateRequest["time_series_model"] })}
+                >
+                  <option value="normal">Normal</option>
+                  <option value="garch">GARCH</option>
+                </select>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ===== Parameterized Distribution ===== */}
+        {value.simulation_model === "parameterized" && (
+          <>
+            <div className="section-title" style={{ marginTop: 20 }}>Parameterized Distribution</div>
+            <div className="form-grid">
+              <div className="form-field">
+                <label htmlFor="distribution">Distribution</label>
+                <select
+                  className="field"
+                  id="distribution"
+                  value={value.distribution ?? "normal"}
+                  onChange={(e) => patch({ distribution: e.target.value as SimulateRequest["distribution"] })}
+                >
+                  <option value="normal">Normal</option>
+                  <option value="fat_tailed">Fat-tailed (Student-t)</option>
+                </select>
+              </div>
+              {value.distribution === "fat_tailed" && (
+                <div className="form-field">
+                  <label htmlFor="degrees_of_freedom">Degrees of Freedom</label>
+                  <input
+                    className="field num"
+                    id="degrees_of_freedom"
+                    min={1}
+                    type="number"
+                    value={value.degrees_of_freedom ?? 5}
+                    onChange={(e) => patch({ degrees_of_freedom: Number(e.target.value) })}
+                  />
+                </div>
+              )}
+              <div className="form-field">
+                <label htmlFor="expected_return">Expected Return</label>
+                <input
+                  className="field num"
+                  id="expected_return"
+                  step="0.01"
+                  type="number"
+                  value={value.expected_return ?? 0}
+                  onChange={(e) => patch({ expected_return: Number(e.target.value) })}
+                />
+              </div>
+              <div className="form-field">
+                <label htmlFor="expected_volatility">Expected Volatility</label>
+                <input
+                  className="field num"
+                  id="expected_volatility"
+                  step="0.01"
+                  type="number"
+                  value={value.expected_volatility ?? 0}
+                  onChange={(e) => patch({ expected_volatility: Number(e.target.value) })}
+                />
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ===== Cashflow & Goals ===== */}
+        <div className="section-title" style={{ marginTop: 20 }}>Cashflow &amp; Goals</div>
+        <div className="form-grid">
+          <div className="form-field">
+            <label htmlFor="multi_goal">Advanced: multiple goals</label>
+            <select
+              className="field"
+              id="multi_goal"
+              value={multiGoal ? "yes" : "no"}
+              onChange={(e) => toggleMultiGoal(e.target.value === "yes")}
+            >
+              <option value="no">Single cashflow</option>
+              <option value="yes">Multiple goals</option>
+            </select>
+          </div>
+        </div>
+
+        {!multiGoal ? (
+          <div className="form-grid">
+            <div className="form-field">
+              <label htmlFor="cashflow_mode">Cashflow</label>
+              <select
+                className="field"
+                id="cashflow_mode"
+                value={value.cashflow_mode}
+                onChange={(e) => patch({ cashflow_mode: e.target.value as SimulateRequest["cashflow_mode"] })}
+              >
                 <option value="none">No contributions or withdrawals</option>
                 <option value="contribute">Contribute fixed amount periodically</option>
                 <option value="withdraw_fixed">Withdraw fixed amount periodically</option>
                 <option value="withdraw_percent">Withdraw fixed percentage periodically</option>
               </select>
-            </label>
+            </div>
             {value.cashflow_mode !== "none" && (
               <>
-                <label>
-                  Amount
-                  <input className="field" type="number" value={value.cashflow_amount ?? 0}
-                    onChange={(e) => patch({ cashflow_amount: Number(e.target.value) })} />
-                </label>
-                <label>
-                  Inflation Adjusted
-                  <select className="field" value={value.cashflow_inflation_adjusted ? "yes" : "no"}
-                    onChange={(e) => patch({ cashflow_inflation_adjusted: e.target.value === "yes" })}>
+                <div className="form-field">
+                  <label htmlFor="cashflow_amount">Amount</label>
+                  <input
+                    className="field num"
+                    id="cashflow_amount"
+                    min={0}
+                    type="number"
+                    value={value.cashflow_amount ?? 0}
+                    onChange={(e) => patch({ cashflow_amount: Number(e.target.value) })}
+                  />
+                </div>
+                <div className="form-field">
+                  <label htmlFor="cashflow_inflation_adjusted">Inflation Adjusted</label>
+                  <select
+                    className="field"
+                    id="cashflow_inflation_adjusted"
+                    value={value.cashflow_inflation_adjusted ? "yes" : "no"}
+                    onChange={(e) => patch({ cashflow_inflation_adjusted: e.target.value === "yes" })}
+                  >
                     <option value="yes">Yes</option>
                     <option value="no">No</option>
                   </select>
-                </label>
-                <label>
-                  Frequency
-                  <select className="field" value={value.cashflow_frequency ?? "annually"}
-                    onChange={(e) => patch({ cashflow_frequency: e.target.value as SimulateRequest["cashflow_frequency"] })}>
+                </div>
+                <div className="form-field">
+                  <label htmlFor="cashflow_frequency">Frequency</label>
+                  <select
+                    className="field"
+                    id="cashflow_frequency"
+                    value={value.cashflow_frequency ?? "annually"}
+                    onChange={(e) => patch({ cashflow_frequency: e.target.value as SimulateRequest["cashflow_frequency"] })}
+                  >
                     <option value="monthly">Monthly</option>
                     <option value="quarterly">Quarterly</option>
                     <option value="annually">Annually</option>
                   </select>
-                </label>
+                </div>
               </>
             )}
-          </>
+          </div>
         ) : (
           <GoalsTable goals={value.goals ?? []} onChange={(goals) => patch({ goals })} />
         )}
+
+        {/* ===== Inflation & Rebalancing ===== */}
+        <div className="section-title" style={{ marginTop: 20 }}>Inflation &amp; Rebalancing</div>
+        <div className="form-grid">
+          <div className="form-field">
+            <label htmlFor="inflation_model">Inflation Model</label>
+            <select
+              className="field"
+              id="inflation_model"
+              value={value.inflation_model}
+              onChange={(e) => patch({ inflation_model: e.target.value as SimulateRequest["inflation_model"] })}
+            >
+              <option value="historical">Historical Inflation</option>
+              <option value="parameterized">Parameterized Inflation</option>
+            </select>
+          </div>
+          {value.inflation_model === "parameterized" && (
+            <>
+              <div className="form-field">
+                <label htmlFor="inflation_mean">Mean</label>
+                <input
+                  className="field num"
+                  id="inflation_mean"
+                  step="0.001"
+                  type="number"
+                  value={value.inflation_mean ?? 0.03}
+                  onChange={(e) => patch({ inflation_mean: Number(e.target.value) })}
+                />
+              </div>
+              <div className="form-field">
+                <label htmlFor="inflation_volatility">Volatility</label>
+                <input
+                  className="field num"
+                  id="inflation_volatility"
+                  step="0.001"
+                  type="number"
+                  value={value.inflation_volatility ?? 0.01}
+                  onChange={(e) => patch({ inflation_volatility: Number(e.target.value) })}
+                />
+              </div>
+            </>
+          )}
+          <div className="form-field">
+            <label htmlFor="rebalancing">Rebalancing</label>
+            <select
+              className="field"
+              id="rebalancing"
+              value={value.rebalancing}
+              onChange={(e) => patch({ rebalancing: e.target.value as SimulateRequest["rebalancing"] })}
+            >
+              <option value="none">No rebalancing</option>
+              <option value="annual">Rebalance annually</option>
+              <option value="semiannual">Rebalance semi-annually</option>
+              <option value="quarterly">Rebalance quarterly</option>
+              <option value="monthly">Rebalance monthly</option>
+            </select>
+          </div>
+        </div>
+
+        {/* ===== Advanced Settings (optional) ===== */}
+        <div className={advancedOpen ? "advanced-toggle open" : "advanced-toggle"} onClick={() => setAdvancedOpen((open) => !open)}>
+          <span className="chev">&#9654;</span> Advanced settings
+        </div>
+        <div className={advancedOpen ? "advanced-body open" : "advanced-body"}>
+          <div className="form-grid">
+            <div className="form-field">
+              <label htmlFor="n_paths">Number of Simulation Paths</label>
+              <input
+                className="field num"
+                id="n_paths"
+                min={1}
+                type="number"
+                value={value.n_paths}
+                onChange={(e) => patch({ n_paths: Number(e.target.value) })}
+              />
+            </div>
+            {value.simulation_model === "historical" && value.bootstrap_model === "block_of_years" && (
+              <div className="form-field">
+                <label htmlFor="block_years">Block Size (years)</label>
+                <input
+                  className="field num"
+                  id="block_years"
+                  min={1}
+                  type="number"
+                  value={value.block_years ?? 1}
+                  onChange={(e) => patch({ block_years: Number(e.target.value) })}
+                />
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
-      <div className="card">
-        <h2>Inflation &amp; Rebalancing</h2>
-        <label>
-          Inflation Model
-          <select className="field" value={value.inflation_model} onChange={(e) => patch({ inflation_model: e.target.value as SimulateRequest["inflation_model"] })}>
-            <option value="historical">Historical Inflation</option>
-            <option value="parameterized">Parameterized Inflation</option>
-          </select>
-        </label>
-        {value.inflation_model === "parameterized" && (
-          <>
-            <label>
-              Mean
-              <input className="field" type="number" step="0.001" value={value.inflation_mean ?? 0.03}
-                onChange={(e) => patch({ inflation_mean: Number(e.target.value) })} />
-            </label>
-            <label>
-              Volatility
-              <input className="field" type="number" step="0.001" value={value.inflation_volatility ?? 0.01}
-                onChange={(e) => patch({ inflation_volatility: Number(e.target.value) })} />
-            </label>
-          </>
-        )}
-        <label>
-          Rebalancing
-          <select className="field" value={value.rebalancing} onChange={(e) => patch({ rebalancing: e.target.value as SimulateRequest["rebalancing"] })}>
-            <option value="none">No rebalancing</option>
-            <option value="annual">Rebalance annually</option>
-            <option value="semiannual">Rebalance semi-annually</option>
-            <option value="quarterly">Rebalance quarterly</option>
-            <option value="monthly">Rebalance monthly</option>
-          </select>
-        </label>
+      {/* ===== Review Box ===== */}
+      <div className="review-box">
+        Run <b>{value.simulation_model}</b> simulation for <b>{value.simulation_period_years} years</b> with initial amount <b>{value.initial_amount.toLocaleString()}</b> using <b>{value.n_paths.toLocaleString()} paths</b>
+        {value.cashflow_mode !== "none" && !multiGoal ? <>, with <b>{value.cashflow_mode}</b> mode cashflows</> : null}
+        {multiGoal ? <>, with {goalsSummary}</> : null}
+        {value.rebalancing !== "none" ? <>, rebalanced <b>{value.rebalancing}</b></> : null}.
       </div>
 
-      <button className="btn btn-primary" onClick={onContinue} type="button">Continue to Results</button>
+      {/* ===== Actions ===== */}
+      <div className="actions">
+        <button className="btn btn-ghost" onClick={onBack} type="button">&larr; Back</button>
+        <button className="btn btn-primary" onClick={onContinue} type="button">Continue to Results &rarr;</button>
+      </div>
     </div>
   );
 }
