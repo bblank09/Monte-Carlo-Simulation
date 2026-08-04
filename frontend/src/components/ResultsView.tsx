@@ -99,7 +99,7 @@ function OverviewTab({ result }: { result: SimulateResponse }) {
           {overview.holdings.map((h) => (
             <tr key={h.proj_id}>
               <td>{h.proj_id}</td>
-              <td>{(h.weight * 100).toFixed(1)}%</td>
+              <td>{h.weight.toFixed(1)}%</td>
             </tr>
           ))}
         </tbody>
