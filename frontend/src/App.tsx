@@ -35,6 +35,12 @@ export function App() {
   const [result, setResult] = useState<SimulateResponse | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [theme, setTheme] = useState<"light" | "dark">(() => (localStorage.getItem("mc-theme") === "dark" ? "dark" : "light"));
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("mc-theme", theme);
+  }, [theme]);
 
   useEffect(() => {
     getFunds()
@@ -65,25 +71,47 @@ export function App() {
   }
 
   return (
-    <div className="app-shell">
-      <Stepper currentStep={stepIndex} unlockedStep={unlockedStep} onStepClick={goToStep} />
+    <div className="shell">
+      <header className="topbar">
+        <div className="brand">
+          <img alt="Monte Carlo Simulation" className="mark" src="/brand/topbar-mark.png" />
+          <span>Monte Carlo Simulation</span>
+          <span className="tag">Forward-looking portfolio simulation</span>
+        </div>
+        <Stepper currentStep={stepIndex} unlockedStep={unlockedStep} onStepClick={goToStep} />
+        <button className="theme-toggle" onClick={() => setTheme((current) => (current === "light" ? "dark" : "light"))} type="button">
+          Toggle theme
+        </button>
+      </header>
+
+      <div className="main">
+        {error && <div className="banner danger">{error}</div>}
+        {step === "portfolio" && (
+          <PortfolioStep
+            funds={funds}
+            active
+            onHoldingsChange={setHoldings}
+            onContinue={() => {
+              setUnlockedStep((current) => Math.max(current, 1));
+              setStepIndex(1);
+            }}
+          />
+        )}
+        {step === "parameters" && (
+          <ParametersStep active value={params} onChange={setParams} onContinue={runSimulation} />
+        )}
+        {step === "results" && result && <ResultsView result={result} />}
+      </div>
+
+      <footer className="app-footer">
+        <img alt="Supachok Julaupay signature mark" className="app-footer-mark" src={theme === "dark" ? "/brand/author-logo-dark.png" : "/brand/author-logo-light.png"} />
+        <div className="app-footer-text">
+          <span className="app-footer-name">Supachok Julaupay</span>
+          <a href="https://github.com/bblank09" rel="noreferrer" target="_blank">github.com/bblank09</a>
+        </div>
+      </footer>
+
       <RunOverlay open={running} />
-      {error && <div className="banner danger">{error}</div>}
-      {step === "portfolio" && (
-        <PortfolioStep
-          funds={funds}
-          active
-          onHoldingsChange={setHoldings}
-          onContinue={() => {
-            setUnlockedStep((current) => Math.max(current, 1));
-            setStepIndex(1);
-          }}
-        />
-      )}
-      {step === "parameters" && (
-        <ParametersStep active value={params} onChange={setParams} onContinue={runSimulation} />
-      )}
-      {step === "results" && result && <ResultsView result={result} />}
     </div>
   );
 }
