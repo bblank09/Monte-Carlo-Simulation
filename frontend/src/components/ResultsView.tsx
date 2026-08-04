@@ -1,8 +1,9 @@
 import { useState } from "react";
+import type { ReactNode } from "react";
 import { Download, ShieldCheck } from "lucide-react";
 import type { SimulateResponse } from "../types/simulate";
-import { AxisCurve, Histogram, CorrelationMatrix, DataTable } from "./charts";
-import type { ChartSeries, HistogramBin, TableSection } from "./charts";
+import { AllocationPie, AxisCurve, Histogram, CorrelationMatrix, DataTable } from "./charts";
+import type { AllocationSlice, ChartSeries, HistogramBin, TableSection } from "./charts";
 
 type ResultsTab = "overview" | "growth" | "distribution" | "metrics" | "risk" | "goals" | "report";
 
@@ -17,12 +18,23 @@ const SIMULATION_MODEL_LABELS: Record<string, string> = {
   parameterized: "Parameterized",
 };
 
-function downloadResultJson(result: SimulateResponse) {
-  const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" });
+const PERCENTILE_KEYS = ["10", "25", "50", "75", "90"];
+const HORIZON_YEARS = ["1", "3", "5", "10", "15", "20", "25", "30"];
+
+function pctString(value: number, digits = 2) {
+  return `${(value * 100).toFixed(digits)}%`;
+}
+
+function money(value: number) {
+  return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
+}
+
+function downloadText(filename: string, content: string, type: string) {
+  const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "simulation_result.json";
+  a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -57,7 +69,11 @@ export function ResultsView({ result }: Props) {
             {modelLabel} model{years ? ` · ${years}-year horizon` : ""}
           </h2>
         </div>
-        <button className="secondaryButton" onClick={() => downloadResultJson(result)} type="button">
+        <button
+          className="secondaryButton"
+          onClick={() => downloadText("simulation_result.json", JSON.stringify(result, null, 2), "application/json")}
+          type="button"
+        >
           <Download size={16} /> Result JSON
         </button>
       </div>
@@ -99,6 +115,11 @@ interface OverviewData {
 
 function OverviewTab({ result }: { result: SimulateResponse }) {
   const overview = result.overview as unknown as OverviewData;
+  const slices: AllocationSlice[] = overview.holdings.map((h) => ({
+    key: h.proj_id,
+    label: h.proj_id,
+    weight: h.weight,
+  }));
   return (
     <div className="card">
       <h2>Overview</h2>
@@ -127,6 +148,8 @@ function OverviewTab({ result }: { result: SimulateResponse }) {
           <strong>{overview.n_paths.toLocaleString()}</strong>
         </div>
       </div>
+      <h3>Portfolio Allocation</h3>
+      <AllocationPie slices={slices} />
       <h3>Portfolio Holdings</h3>
       <table>
         <thead>
@@ -199,27 +222,48 @@ function GrowthTab({ result }: { result: SimulateResponse }) {
 
 interface DistributionData {
   ending_balance_histogram: number[];
+  max_drawdown_histogram: number[];
 }
 
 function DistributionTab({ result }: { result: SimulateResponse }) {
   const distribution = result.distribution as unknown as DistributionData;
-  const bins = buildHistogramBins(distribution.ending_balance_histogram, 30);
+  const bins = buildHistogramBins(distribution.ending_balance_histogram, 30, money);
+  const drawdownBins = distribution.max_drawdown_histogram
+    ? buildHistogramBins(distribution.max_drawdown_histogram, 30, (v) => pctString(v, 1))
+    : [];
   return (
     <div className="card">
       <h2>Distribution</h2>
       <p>Distribution of the simulated portfolio's ending balance across all paths.</p>
       <Histogram rows={bins} />
+      {drawdownBins.length ? (
+        <>
+          <h3>Max Drawdown Distribution</h3>
+          <p>Distribution of each simulated path's worst peak-to-trough drawdown.</p>
+          <Histogram rows={drawdownBins} />
+        </>
+      ) : null}
     </div>
   );
 }
 
-function buildHistogramBins(values: number[], nBins: number): HistogramBin[] {
+function buildHistogramBins(
+  values: number[],
+  nBins: number,
+  formatBinLabel: (value: number) => string = money
+): HistogramBin[] {
   if (!values.length) return [];
   const min = Math.min(...values);
   const max = Math.max(...values);
   const width = (max - min) / nBins || 1;
+  // Bin labels double as React keys in Histogram (key={row.bin}), so they
+  // must stay unique even when the raw values are close together (e.g. a
+  // fractional drawdown range like -0.65..-0.02 would collapse to a
+  // handful of duplicate "0"/"-1" strings under whole-number formatting) —
+  // the bin index is appended to guarantee uniqueness regardless of the
+  // caller's formatter/value scale.
   const bins: HistogramBin[] = Array.from({ length: nBins }, (_, i) => ({
-    bin: (min + i * width).toLocaleString(undefined, { maximumFractionDigits: 0 }),
+    bin: `${formatBinLabel(min + i * width)}#${i}`,
     count: 0,
     from: min + i * width,
     to: min + (i + 1) * width,
@@ -233,34 +277,51 @@ function buildHistogramBins(values: number[], nBins: number): HistogramBin[] {
 
 // --- Metrics ---------------------------------------------------------
 
+interface PercentileTable {
+  ending_balance: Record<string, number>;
+  cagr: Record<string, number>;
+  twrr_nominal: Record<string, number>;
+  twrr_real: Record<string, number>;
+  max_drawdown: Record<string, number>;
+  max_drawdown_excl_cashflows: Record<string, number>;
+}
+
 interface MetricsData {
-  percentile_table: { ending_balance: Record<string, number>; cagr: Record<string, number> };
+  percentile_table: PercentileTable;
   sharpe: Record<string, number>;
   sortino: Record<string, number>;
   safe_withdrawal_rate: Record<string, number>;
   perpetual_withdrawal_rate: Record<string, number>;
 }
 
-function MetricsTab({ result }: { result: SimulateResponse }) {
-  const metrics = result.metrics as unknown as MetricsData;
-  const pcts = ["10", "25", "50", "75", "90"];
+function metricsSection(metrics: MetricsData): TableSection {
+  const pcts = PERCENTILE_KEYS;
   const columns = ["metric", ...pcts.map((p) => `${p}th Percentile`)];
-  const section: TableSection = {
+  const pt = metrics.percentile_table;
+  return {
     title: "Performance Summary",
     columns,
     rows: [
-      ["Ending Balance", ...pcts.map((p) => metrics.percentile_table.ending_balance[p])],
-      ["CAGR", ...pcts.map((p) => metrics.percentile_table.cagr[p])],
-      ["Sharpe Ratio", ...pcts.map((p) => metrics.sharpe[p])],
-      ["Sortino Ratio", ...pcts.map((p) => metrics.sortino[p])],
-      ["Safe Withdrawal Rate", ...pcts.map((p) => metrics.safe_withdrawal_rate[p])],
-      ["Perpetual Withdrawal Rate", ...pcts.map((p) => metrics.perpetual_withdrawal_rate[p])],
+      ["Ending Balance", ...pcts.map((p) => money(pt.ending_balance[p]))],
+      ["TWRR (nominal)", ...pcts.map((p) => pctString(pt.twrr_nominal[p]))],
+      ["TWRR (real)", ...pcts.map((p) => pctString(pt.twrr_real[p]))],
+      ["CAGR", ...pcts.map((p) => pctString(pt.cagr[p]))],
+      ["Max Drawdown", ...pcts.map((p) => pctString(pt.max_drawdown[p]))],
+      ["Max Drawdown (excl. cashflows)", ...pcts.map((p) => pctString(pt.max_drawdown_excl_cashflows[p]))],
+      ["Sharpe Ratio", ...pcts.map((p) => metrics.sharpe[p].toFixed(2))],
+      ["Sortino Ratio", ...pcts.map((p) => metrics.sortino[p].toFixed(2))],
+      ["Safe Withdrawal Rate", ...pcts.map((p) => pctString(metrics.safe_withdrawal_rate[p]))],
+      ["Perpetual Withdrawal Rate", ...pcts.map((p) => pctString(metrics.perpetual_withdrawal_rate[p]))],
     ],
   };
+}
+
+function MetricsTab({ result }: { result: SimulateResponse }) {
+  const metrics = result.metrics as unknown as MetricsData;
   return (
     <div className="card">
       <h2>Metrics</h2>
-      <DataTable section={section} />
+      <DataTable section={metricsSection(metrics)} />
     </div>
   );
 }
@@ -274,6 +335,53 @@ interface RiskData {
   };
   value_at_risk: number;
   expected_shortfall: number;
+  expected_return_by_horizon: Record<string, Record<string, number>>;
+  annual_return_probability: Record<string, Record<string, number>>;
+  loss_probability: {
+    excluding_cashflows: { within_period: Record<string, number>; end_of_period: Record<string, number> };
+    including_cashflows: { within_period: Record<string, number>; end_of_period: Record<string, number> };
+  };
+}
+
+function expectedReturnByHorizonSection(data: Record<string, Record<string, number>>): TableSection {
+  return {
+    title: "Expected Annual Return by Horizon",
+    columns: ["percentile", ...HORIZON_YEARS.map((h) => `${h}yr`)],
+    rows: PERCENTILE_KEYS.map((p) => [`${p}th`, ...HORIZON_YEARS.map((h) => pctString(data[h]?.[p] ?? 0))]),
+  };
+}
+
+function annualReturnProbabilitySection(data: Record<string, Record<string, number>>): TableSection {
+  const thresholdLabels = Object.keys(data);
+  return {
+    title: "Annual Return Probability",
+    columns: ["threshold", ...HORIZON_YEARS.map((h) => `${h}yr`)],
+    rows: thresholdLabels.map((label) => [
+      `>= ${label}`,
+      ...HORIZON_YEARS.map((h) => pctString(data[label]?.[h] ?? 0)),
+    ]),
+  };
+}
+
+function lossProbabilitySection(data: RiskData["loss_probability"]): TableSection {
+  const thresholdLabels = Object.keys(data.excluding_cashflows.within_period);
+  return {
+    title: "Loss Probability",
+    columns: [
+      "threshold",
+      "Excl. Cashflows — Within",
+      "Excl. Cashflows — End",
+      "Incl. Cashflows — Within",
+      "Incl. Cashflows — End",
+    ],
+    rows: thresholdLabels.map((label) => [
+      `>= ${label}`,
+      pctString(data.excluding_cashflows.within_period[label] ?? 0),
+      pctString(data.excluding_cashflows.end_of_period[label] ?? 0),
+      pctString(data.including_cashflows.within_period[label] ?? 0),
+      pctString(data.including_cashflows.end_of_period[label] ?? 0),
+    ]),
+  };
 }
 
 function RiskTab({ result }: { result: SimulateResponse }) {
@@ -304,19 +412,73 @@ function RiskTab({ result }: { result: SimulateResponse }) {
       <CorrelationMatrix ids={ids} correlation={risk.correlation_and_returns.correlation} />
       <h3>Per-Holding Statistics</h3>
       <DataTable section={statsSection} />
+      {risk.expected_return_by_horizon ? (
+        <>
+          <h3>Expected Annual Return by Horizon</h3>
+          <DataTable section={expectedReturnByHorizonSection(risk.expected_return_by_horizon)} />
+        </>
+      ) : null}
+      {risk.annual_return_probability ? (
+        <>
+          <h3>Annual Return Probability</h3>
+          <DataTable section={annualReturnProbabilitySection(risk.annual_return_probability)} />
+        </>
+      ) : null}
+      {risk.loss_probability ? (
+        <>
+          <h3>Loss Probability</h3>
+          <DataTable section={lossProbabilitySection(risk.loss_probability)} />
+        </>
+      ) : null}
     </div>
   );
 }
 
 // --- Goals & Cashflows ---------------------------------------------------------
 
+interface GlidePath {
+  years: number[];
+  allocations: Record<string, number[]>;
+}
+
 interface GoalsData {
   summary: { purpose: string; success_rate: number }[];
+  cashflows_nominal?: number[];
+  cashflows_present_dollar?: number[];
+  glide_path?: GlidePath;
 }
+
+const GLIDE_PALETTE = ["var(--accent)", "var(--success)", "var(--warn)", "var(--danger)", "#7c4ded"];
 
 function GoalsTab({ goals }: { goals: Record<string, unknown> }) {
   const data = goals as unknown as GoalsData;
   const summary = data.summary ?? [];
+
+  const hasCashflows = !!(data.cashflows_nominal && data.cashflows_nominal.length);
+  const cashflowSeries: ChartSeries[] = hasCashflows
+    ? [
+        {
+          label: "Nominal",
+          color: "var(--accent)",
+          points: (data.cashflows_nominal ?? []).map((y, x) => ({ x, y })),
+        },
+        {
+          label: "Present dollar",
+          color: "var(--success)",
+          dashed: true,
+          points: (data.cashflows_present_dollar ?? []).map((y, x) => ({ x, y })),
+        },
+      ]
+    : [];
+
+  const glidePathSeries: ChartSeries[] = data.glide_path
+    ? Object.entries(data.glide_path.allocations).map(([projId, values], index) => ({
+        label: projId,
+        color: GLIDE_PALETTE[index % GLIDE_PALETTE.length],
+        points: values.map((y, i) => ({ x: data.glide_path!.years[i] ?? i, y })),
+      }))
+    : [];
+
   return (
     <div className="card">
       <h2>Goals &amp; Cashflows</h2>
@@ -340,45 +502,253 @@ function GoalsTab({ goals }: { goals: Record<string, unknown> }) {
           </tbody>
         </table>
       )}
+      {hasCashflows ? (
+        <>
+          <h3>Simulated Cashflows</h3>
+          <AxisCurve
+            title="Annual Cashflow (nominal vs. present dollar)"
+            series={cashflowSeries}
+            valueFormat={(v) => v.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+            xFormat={(v) => `Yr ${v}`}
+          />
+        </>
+      ) : null}
+      {glidePathSeries.length ? (
+        <>
+          <h3>Glide Path</h3>
+          <p>Target allocation transition from the working-years portfolio to the retirement portfolio.</p>
+          <AxisCurve
+            title="Allocation by Holding Over Time"
+            series={glidePathSeries}
+            valueFormat={(v) => `${v.toFixed(1)}%`}
+            xFormat={(v) => `Yr ${v}`}
+          />
+        </>
+      ) : null}
     </div>
   );
 }
 
 // --- Report ---------------------------------------------------------
 
-function ReportTab({ result }: { result: SimulateResponse }) {
-  function downloadJson() {
-    const blob = new Blob([JSON.stringify(result.run_config, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "run_config.json";
-    a.click();
-    URL.revokeObjectURL(url);
-  }
+interface RunConfigData {
+  simulation_model?: string;
+  simulation_period_years?: number;
+  initial_amount?: number;
+  tax_treatment?: string;
+  holdings?: { proj_id: string; weight: number }[];
+}
 
-  function downloadFullResult() {
-    const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "simulation_result.json";
-    a.click();
-    URL.revokeObjectURL(url);
+function simulationMethodology(model: string | undefined) {
+  switch (model) {
+    case "historical":
+      return "This run uses a historical bootstrap model: paths are built by resampling blocks of real historical fund returns, preserving the empirical shape of market behavior (fat tails, autocorrelation) without assuming a parametric distribution.";
+    case "forecasted":
+      return "This run uses a forecasted-returns model: expected return and volatility inputs are derived from forward-looking capital market assumptions rather than raw historical history, then simulated forward.";
+    case "statistical":
+      return "This run uses a statistical model: paths are generated from a fitted return-generating process (e.g. GARCH/normal) calibrated to the selected holdings' historical statistics.";
+    case "parameterized":
+      return "This run uses a parameterized model: the user directly specified expected return and volatility assumptions, which drive every simulated path.";
+    default:
+      return "This run uses a Monte Carlo simulation model to generate a distribution of possible future portfolio paths.";
   }
+}
+
+function reportNarrative(runConfig: RunConfigData) {
+  const model = SIMULATION_MODEL_LABELS[runConfig.simulation_model ?? ""] ?? "Monte Carlo";
+  return `This report simulates a portfolio starting at ${money(runConfig.initial_amount ?? 0)} over a ${runConfig.simulation_period_years ?? "?"}-year horizon using the ${model} simulation model.`;
+}
+
+function portfolioSpecRows(runConfig: RunConfigData): TableSection {
+  return {
+    title: "",
+    columns: ["field", "value"],
+    rows: [
+      ["Initial Amount", money(runConfig.initial_amount ?? 0)],
+      ["Simulation Period (years)", String(runConfig.simulation_period_years ?? "")],
+      ["Tax Treatment", humanizeLabel(runConfig.tax_treatment ?? "")],
+      ["Simulation Model", SIMULATION_MODEL_LABELS[runConfig.simulation_model ?? ""] ?? runConfig.simulation_model ?? ""],
+      ...(runConfig.holdings ?? []).map((h) => [`Holding: ${h.proj_id}`, `${h.weight.toFixed(1)}%`]),
+    ],
+  };
+}
+
+function humanizeLabel(value: string) {
+  return value.replace(/_/g, " ");
+}
+
+function riskSummaryRows(metrics: MetricsData, risk: RiskData): TableSection {
+  const pt = metrics.percentile_table;
+  return {
+    title: "",
+    columns: ["metric", "value (median)"],
+    rows: [
+      ["Sharpe Ratio", metrics.sharpe["50"].toFixed(2)],
+      ["Sortino Ratio", metrics.sortino["50"].toFixed(2)],
+      ["Max Drawdown", pctString(pt.max_drawdown["50"])],
+      ["Value at Risk (90%)", money(risk.value_at_risk)],
+      ["Expected Shortfall (90%)", money(risk.expected_shortfall)],
+    ],
+  };
+}
+
+const FORMULA_ROWS: TableSection = {
+  title: "",
+  columns: ["formula", "definition"],
+  rows: [
+    ["CAGR", "(Ending Balance / Initial Amount) ^ (1 / Years) - 1"],
+    ["Sharpe Ratio", "(Portfolio Return - Risk-free Rate) / Portfolio Volatility"],
+    ["Sortino Ratio", "(Portfolio Return - Risk-free Rate) / Downside Deviation"],
+    ["Value at Risk (VaR)", "Loss at the chosen confidence percentile of the simulated ending-balance distribution"],
+    ["Expected Shortfall (ES)", "Average loss in the tail beyond the VaR threshold"],
+    ["Safe Withdrawal Rate", "Largest constant withdrawal rate that keeps the chosen percentile of paths solvent through the horizon"],
+  ],
+};
+
+function markdownTable(section: TableSection) {
+  if (!section.rows.length) return "_No rows._";
+  const header = `| ${section.columns.map(humanizeLabel).join(" | ")} |`;
+  const divider = `| ${section.columns.map(() => "---").join(" | ")} |`;
+  const body = section.rows.map((row) => `| ${row.join(" | ")} |`).join("\n");
+  return [header, divider, body].join("\n");
+}
+
+function reportMarkdown(result: SimulateResponse) {
+  const runConfig = result.run_config as unknown as RunConfigData;
+  const metrics = result.metrics as unknown as MetricsData;
+  const risk = result.risk as unknown as RiskData;
+  const overview = result.overview as unknown as OverviewData;
+  const ids = Object.keys(risk.correlation_and_returns.correlation);
+
+  const sections: { title: string; body: string }[] = [
+    { title: "1. Research question", body: reportNarrative(runConfig) },
+    { title: "2. Data and methodology", body: `${simulationMethodology(runConfig.simulation_model)} This is a forward-looking Monte Carlo simulation, not a historical backtest — it generates many possible future paths rather than replaying one realized history.` },
+    { title: "3. Portfolio specification", body: markdownTable(portfolioSpecRows(runConfig)) },
+    { title: "4. Performance results", body: markdownTable(metricsSection(metrics)) },
+    { title: "5. Risk analysis", body: markdownTable(riskSummaryRows(metrics, risk)) },
+    {
+      title: "6. Distribution analysis",
+      body: `${overview.survived_count} of ${overview.n_paths} simulated paths (${pctString(overview.survival_rate)}) survived through the full horizon. The ending balance spread runs from ${money(metrics.percentile_table.ending_balance["10"])} at the 10th percentile to ${money(metrics.percentile_table.ending_balance["90"])} at the 90th percentile.`,
+    },
+    { title: "7. Diversification and correlation", body: `Correlation was computed across ${ids.length} holding(s): ${ids.join(", ")}. See the Risk & Correlation tab for the full pairwise matrix.` },
+    { title: "Formula reference", body: markdownTable(FORMULA_ROWS) },
+    {
+      title: "Limitations",
+      body: "Monte Carlo simulation only — not a forecast or investment advice. Based on historical parameter estimates (or user-specified parameters for the Parameterized model); past correlations and volatility may not hold in the future. Does not account for taxes or fees beyond what was explicitly configured.",
+    },
+  ];
+
+  const header = `# Research Report — ${SIMULATION_MODEL_LABELS[runConfig.simulation_model ?? ""] ?? "Monte Carlo"} model, ${runConfig.simulation_period_years ?? "?"}-year horizon`;
+  return [header, ...sections.map((s) => `## ${s.title}\n\n${s.body}`)].join("\n\n");
+}
+
+function ReportSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section>
+      <strong>{title}</strong>
+      {children}
+    </section>
+  );
+}
+
+function ReportTab({ result }: { result: SimulateResponse }) {
+  const runConfig = result.run_config as unknown as RunConfigData;
+  const metrics = result.metrics as unknown as MetricsData;
+  const risk = result.risk as unknown as RiskData;
+  const overview = result.overview as unknown as OverviewData;
+  const modelLabel = SIMULATION_MODEL_LABELS[runConfig.simulation_model ?? ""] ?? "Monte Carlo";
 
   return (
-    <div className="card">
-      <h2>Report</h2>
-      <p>Export this simulation run for records or further analysis.</p>
-      <div className="stat-row">
-        <button type="button" className="btn btn-ghost" onClick={downloadJson}>
-          Export run_config.json
-        </button>
-        <button type="button" className="btn btn-ghost" onClick={downloadFullResult}>
-          Export full result (JSON)
-        </button>
-      </div>
+    <div className="tabStack">
+      <section className="chartPanel">
+        <h3>Export</h3>
+        <div className="exportActions">
+          <button
+            className="secondaryButton"
+            onClick={() => downloadText("report.md", reportMarkdown(result), "text/markdown")}
+            type="button"
+          >
+            report.md
+          </button>
+          <button
+            className="secondaryButton"
+            onClick={() => downloadText("run_config.json", JSON.stringify(result.run_config, null, 2), "application/json")}
+            type="button"
+          >
+            run_config.json
+          </button>
+          <button
+            className="secondaryButton"
+            onClick={() => downloadText("metrics.json", JSON.stringify(result.metrics, null, 2), "application/json")}
+            type="button"
+          >
+            metrics.json
+          </button>
+          <button className="secondaryButton" onClick={() => window.print()} type="button">
+            Print / Save PDF
+          </button>
+        </div>
+      </section>
+
+      <section className="reportPanel">
+        <h3>
+          Research Report &mdash; {modelLabel} model, {runConfig.simulation_period_years ?? "?"}-year horizon
+        </h3>
+        <p className="footnote">Monte Carlo simulation &middot; {overview.n_paths.toLocaleString()} simulated paths</p>
+
+        <ReportSection title="1. Research question">
+          <p>{reportNarrative(runConfig)}</p>
+        </ReportSection>
+
+        <ReportSection title="2. Data and methodology">
+          <p>
+            {simulationMethodology(runConfig.simulation_model)} This is a forward-looking Monte Carlo simulation, not
+            a historical backtest — it generates many possible future paths rather than replaying one realized
+            history.
+          </p>
+        </ReportSection>
+
+        <ReportSection title="3. Portfolio specification">
+          <DataTable caption="Portfolio specification" compact section={portfolioSpecRows(runConfig)} />
+        </ReportSection>
+
+        <ReportSection title="4. Performance results">
+          <DataTable caption="Performance results" section={metricsSection(metrics)} />
+        </ReportSection>
+
+        <ReportSection title="5. Risk analysis">
+          <DataTable caption="Risk analysis" compact section={riskSummaryRows(metrics, risk)} />
+        </ReportSection>
+
+        <ReportSection title="6. Distribution analysis">
+          <p>
+            {overview.survived_count} of {overview.n_paths} simulated paths ({pctString(overview.survival_rate)})
+            survived through the full horizon. The ending balance spread runs from{" "}
+            {money(metrics.percentile_table.ending_balance["10"])} at the 10th percentile to{" "}
+            {money(metrics.percentile_table.ending_balance["90"])} at the 90th percentile.
+          </p>
+        </ReportSection>
+
+        <ReportSection title="7. Diversification and correlation">
+          <p>Pairwise correlation across all holdings, reused from the Risk &amp; Correlation tab:</p>
+          <CorrelationMatrix
+            ids={Object.keys(risk.correlation_and_returns.correlation)}
+            correlation={risk.correlation_and_returns.correlation}
+          />
+        </ReportSection>
+
+        <ReportSection title="Formula reference">
+          <DataTable caption="Formula reference" compact section={FORMULA_ROWS} />
+        </ReportSection>
+
+        <ReportSection title="Limitations">
+          <p>
+            Monte Carlo simulation only &mdash; not a forecast or investment advice. Based on historical parameter
+            estimates (or user-specified parameters for the Parameterized model); past correlations and volatility
+            may not hold in the future. Does not account for taxes or fees beyond what was explicitly configured.
+          </p>
+        </ReportSection>
+      </section>
     </div>
   );
 }

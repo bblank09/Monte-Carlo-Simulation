@@ -336,6 +336,64 @@ export interface CorrelationData {
   correlation: Record<string, Record<string, number | null>>;
 }
 
+const PIE_PALETTE = ["#5b21d6", "#34383e", "#92620a", "#9aa1ac", "#7c4ded"];
+
+export interface AllocationSlice {
+  key: string;
+  label: string;
+  weight: number;
+}
+
+/**
+ * Static (read-only) allocation donut — a simplified, non-interactive
+ * extraction of the drag-to-rebalance donut in PortfolioStep.tsx's
+ * AllocationDonut. Same geometry (cx/cy/r/inner, palette), no drag handles,
+ * suitable for a results summary rather than an editor.
+ */
+export function AllocationPie({ slices }: { slices: AllocationSlice[] }) {
+  const total = slices.reduce((sum, slice) => sum + (slice.weight || 0), 0) || 1;
+  const cx = 60;
+  const cy = 60;
+  const r = 50;
+  const inner = 30;
+
+  let angle = -90;
+  const arcs = slices.map((slice, index) => {
+    const share = (slice.weight || 0) / total;
+    const sweep = share * 360;
+    const startAngle = angle;
+    const x1 = cx + r * Math.cos((startAngle * Math.PI) / 180);
+    const y1 = cy + r * Math.sin((startAngle * Math.PI) / 180);
+    const endAngle = startAngle + sweep;
+    const x2 = cx + r * Math.cos((endAngle * Math.PI) / 180);
+    const y2 = cy + r * Math.sin((endAngle * Math.PI) / 180);
+    const large = sweep > 180 ? 1 : 0;
+    const color = PIE_PALETTE[index % PIE_PALETTE.length];
+    const d = `M${cx},${cy} L${x1.toFixed(2)},${y1.toFixed(2)} A${r},${r} 0 ${large} 1 ${x2.toFixed(2)},${y2.toFixed(2)} Z`;
+    angle = endAngle;
+    return { d, color, key: slice.key, label: slice.label, weight: slice.weight };
+  });
+
+  return (
+    <div className="donut-wrap">
+      <svg height="120" viewBox="0 0 120 120" width="120" role="img" aria-label="Portfolio allocation donut chart">
+        {arcs.map((arc) => (
+          <path d={arc.d} fill={arc.color} key={arc.key} />
+        ))}
+        <circle cx={cx} cy={cy} fill="var(--surface)" r={inner} />
+      </svg>
+      <div className="legend">
+        {arcs.map((arc) => (
+          <div className="row" key={arc.key}>
+            <span className="swatch" style={{ background: arc.color }} />
+            {arc.label} &mdash; {number.format(arc.weight)}%
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function CorrelationMatrix({ ids, displayNameById = {}, correlation }: CorrelationData) {
   return (
     <div className="tableScroller">
