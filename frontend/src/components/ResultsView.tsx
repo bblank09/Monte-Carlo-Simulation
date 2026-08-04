@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { Download, ShieldCheck } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import type { SimulateResponse } from "../types/simulate";
 import { AllocationPie, AxisCurve, Histogram, CorrelationMatrix, DataTable } from "./charts";
 import type { AllocationSlice, ChartSeries, HistogramBin, TableSection } from "./charts";
@@ -69,13 +69,6 @@ export function ResultsView({ result }: Props) {
             {modelLabel} model{years ? ` · ${years}-year horizon` : ""}
           </h2>
         </div>
-        <button
-          className="secondaryButton"
-          onClick={() => downloadText("simulation_result.json", JSON.stringify(result, null, 2), "application/json")}
-          type="button"
-        >
-          <Download size={16} /> Result JSON
-        </button>
       </div>
 
       <nav className="resultTabs" aria-label="Simulation output tabs">
@@ -128,7 +121,7 @@ function OverviewTab({ result }: { result: SimulateResponse }) {
         {(overview.survival_rate * 100).toFixed(2)}%) survived all withdrawals through the full simulation
         horizon.
       </p>
-      <div className="stat-row">
+      <div className="metricGrid">
         <div className="metricCard">
           <span>Median Ending Balance</span>
           <strong>
@@ -428,7 +421,7 @@ function RiskTab({ result }: { result: SimulateResponse }) {
   return (
     <div className="card">
       <h2>Risk &amp; Correlation</h2>
-      <div className="stat-row">
+      <div className="metricGrid">
         <div className="metricCard">
           <span>Value at Risk (90%)</span>
           <strong>{risk.value_at_risk.toLocaleString(undefined, { maximumFractionDigits: 0 })}</strong>
@@ -438,10 +431,16 @@ function RiskTab({ result }: { result: SimulateResponse }) {
           <strong>{risk.expected_shortfall.toLocaleString(undefined, { maximumFractionDigits: 0 })}</strong>
         </div>
       </div>
-      <h3>Correlation Matrix</h3>
-      <CorrelationMatrix ids={ids} correlation={risk.correlation_and_returns.correlation} />
-      <h3>Per-Holding Statistics</h3>
-      <DataTable caption="Per-Holding Statistics" section={statsSection} />
+      <div className="tables">
+        <div>
+          <h3>Correlation Matrix</h3>
+          <CorrelationMatrix ids={ids} correlation={risk.correlation_and_returns.correlation} />
+        </div>
+        <div>
+          <h3>Per-Holding Statistics</h3>
+          <DataTable caption="Per-Holding Statistics" section={statsSection} />
+        </div>
+      </div>
       {risk.expected_return_by_horizon ? (
         <>
           <h3>Expected Annual Return by Horizon</h3>

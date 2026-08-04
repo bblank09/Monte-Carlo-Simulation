@@ -327,6 +327,11 @@ function correlationColor(value: number) {
   return value >= 0 ? `rgb(19 122 79 / ${opacity})` : `rgb(180 35 24 / ${opacity})`;
 }
 
+function formatSignedCorrelation(value: number) {
+  const formatted = number.format(Math.abs(value));
+  return value >= 0 ? `+${formatted}` : `−${formatted}`;
+}
+
 export interface CorrelationData {
   /** Ordered list of asset ids that make up the matrix's rows/columns. */
   ids: string[];
@@ -412,8 +417,14 @@ export function CorrelationMatrix({ ids, displayNameById = {}, correlation }: Co
               {ids.map((colId) => {
                 const value = rowId === colId ? 1 : correlation[rowId]?.[colId] ?? null;
                 return (
-                  <td key={colId} style={{ background: value == null ? undefined : correlationColor(value) }}>
-                    {value == null ? "n/a" : number.format(value)}
+                  <td
+                    key={colId}
+                    style={{
+                      background: value == null ? undefined : correlationColor(value),
+                      borderStyle: value == null ? undefined : value >= 0 ? "solid" : "dashed",
+                    }}
+                  >
+                    {value == null ? "n/a" : formatSignedCorrelation(value)}
                   </td>
                 );
               })}
