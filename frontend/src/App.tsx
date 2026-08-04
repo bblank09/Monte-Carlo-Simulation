@@ -26,12 +26,34 @@ const DEFAULT_REQUEST: SimulateRequest = {
 const STEPS = ["portfolio", "parameters", "results"] as const;
 type Step = (typeof STEPS)[number];
 
+const SESSION_KEY = "mc-session";
+
+type StoredSession = {
+  holdings: Holding[];
+  params: SimulateRequest;
+  stepIndex: number;
+  unlockedStep: number;
+};
+
+function loadStoredSession(): StoredSession | null {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    return parsed as StoredSession;
+  } catch {
+    return null;
+  }
+}
+
 export function App() {
-  const [stepIndex, setStepIndex] = useState(0);
-  const [unlockedStep, setUnlockedStep] = useState(0);
+  const initialSession = loadStoredSession();
+  const [stepIndex, setStepIndex] = useState(initialSession?.stepIndex ?? 0);
+  const [unlockedStep, setUnlockedStep] = useState(initialSession?.unlockedStep ?? 0);
   const [funds, setFunds] = useState<FundSummary[]>([]);
-  const [holdings, setHoldings] = useState<Holding[]>([]);
-  const [params, setParams] = useState<SimulateRequest>(DEFAULT_REQUEST);
+  const [holdings, setHoldings] = useState<Holding[]>(initialSession?.holdings ?? []);
+  const [params, setParams] = useState<SimulateRequest>(initialSession?.params ?? DEFAULT_REQUEST);
   const [result, setResult] = useState<SimulateResponse | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,6 +69,11 @@ export function App() {
       .then(setFunds)
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to load funds"));
   }, []);
+
+  useEffect(() => {
+    const snapshot: StoredSession = { holdings, params, stepIndex, unlockedStep };
+    localStorage.setItem(SESSION_KEY, JSON.stringify(snapshot));
+  }, [holdings, params, stepIndex, unlockedStep]);
 
   const step: Step = STEPS[stepIndex];
 
@@ -81,6 +108,7 @@ export function App() {
     setError(null);
     setUnlockedStep(0);
     setStepIndex(0);
+    localStorage.removeItem(SESSION_KEY);
   }
 
   return (
@@ -151,6 +179,10 @@ export function App() {
         <div className="app-footer-text">
           <span className="app-footer-name">Supachok Julaupay</span>
           <a href="https://github.com/bblank09" rel="noreferrer" target="_blank">github.com/bblank09</a>
+          <span className="app-footer-legal">
+            <a href="#">Privacy</a>
+            <a href="#">Terms</a>
+          </span>
         </div>
       </footer>
 

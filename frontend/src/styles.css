@@ -226,6 +226,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .app-footer-mark { width: 56px; height: 56px; object-fit: contain; border-radius: var(--r-sm); }
 .app-footer-text { display: flex; flex-direction: column; gap: 2px; }
 .app-footer-name { font-size: 13.5px; font-weight: 650; color: var(--text-primary); }
+.app-footer-legal { display: flex; gap: 10px; }
 .app-footer a { font-size: 12px; color: var(--text-tertiary); font-weight: 500; text-decoration: none; }
 .app-footer a:hover { color: var(--accent); text-decoration: underline; }
 
