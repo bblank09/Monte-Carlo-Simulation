@@ -216,7 +216,7 @@ export function ParametersStep({ active, value, onChange, onContinue }: Props) {
         </label>
       </div>
 
-      <button className="primary" onClick={onContinue} type="button">Continue to Results</button>
+      <button className="btn btn-primary" onClick={onContinue} type="button">Continue to Results</button>
     </div>
   );
 }
