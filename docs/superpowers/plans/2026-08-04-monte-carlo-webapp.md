@@ -991,15 +991,16 @@ git commit -m "feat: add inflation model (historical resample + parameterized no
 - Consumes: nothing from earlier tasks.
 - Produces:
   - `apply_cashflow(paths: np.ndarray, initial_amount: float, cashflow: dict) -> np.ndarray` — applies a single fixed contribution/withdrawal cashflow (amount, `is_withdrawal: bool`, `inflation_adjusted: bool`, `frequency: str`) onto simulated growth-factor paths (shape `(n_paths, n_years+1)`), returning dollar-value paths of the same shape.
-  - `apply_named_goals(paths: np.ndarray, initial_amount: float, goals: list[dict]) -> tuple[np.ndarray, list[dict]]` — applies multiple named goals in chronological order; returns the resulting dollar-value paths plus a per-goal summary list with a computed `success_rate` (fraction of paths where the portfolio balance stayed non-negative through that goal's active period).
+  - `apply_named_goals(paths: np.ndarray, initial_amount: float, goals: list[dict]) -> tuple[np.ndarray, list[dict]]` — applies multiple named goals in chronological order, **scaling each goal's `amount` by its `frequency`** (`monthly` → ×12, `quarterly` → ×4, `annually` → ×1) before applying it as an annual net cashflow; returns the resulting dollar-value paths plus a per-goal summary list with a computed `success_rate` (fraction of paths where the portfolio balance stayed non-negative through that goal's active period).
   - `glide_path_weights(start_weights: np.ndarray, end_weights: np.ndarray, glide_path_years: int, year: int) -> np.ndarray` — linear interpolation between `start_weights` and `end_weights`, clamped to `end_weights` once `year >= glide_path_years`.
+  - `build_cashflow_series(paths: np.ndarray, initial_amount: float, goals: list[dict], inflation_draws: np.ndarray | None = None) -> dict` — returns `{"cashflows_nominal": list[float], "cashflows_present_dollar": list[float]}`, one value per year (median across paths of the net signed cashflow active that year); present-dollar values divide by the cumulative median inflation factor up to that year when `inflation_draws` (shape `(n_paths, n_years)`, from `engine/inflation.py`) is supplied, otherwise present-dollar equals nominal.
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 # backend/tests/engine/test_goals.py
 import numpy as np
-from backend.app.engine.goals import apply_cashflow, apply_named_goals, glide_path_weights
+from backend.app.engine.goals import apply_cashflow, apply_named_goals, glide_path_weights, build_cashflow_series
 
 
 def test_apply_cashflow_withdrawal_reduces_balance():
@@ -1031,6 +1032,25 @@ def test_apply_named_goals_reports_success_rate():
     assert summary[0]["success_rate"] == 1.0  # contributions only, can't go negative
 
 
+def test_apply_named_goals_scales_amount_by_frequency():
+    paths = np.ones((5, 3))
+    goals_monthly = [
+        {"purpose": "Monthly contribution", "amount": 10.0, "is_withdrawal": False, "inflation_adjusted": False,
+         "frequency": "monthly", "starts_year": 0, "ends_year": 2},
+    ]
+    goals_annual = [
+        {"purpose": "Annual contribution", "amount": 10.0, "is_withdrawal": False, "inflation_adjusted": False,
+         "frequency": "annually", "starts_year": 0, "ends_year": 2},
+    ]
+    values_monthly, _ = apply_named_goals(paths, initial_amount=1000.0, goals=goals_monthly)
+    values_annual, _ = apply_named_goals(paths, initial_amount=1000.0, goals=goals_annual)
+    # A monthly $10 contribution is $120/yr, 12x an annual $10 contribution -- the
+    # monthly-goal path must end up materially higher than the annual-goal path.
+    assert values_monthly[0, -1] > values_annual[0, -1]
+    assert np.isclose(values_monthly[0, 1] - 1000.0, 120.0)
+    assert np.isclose(values_annual[0, 1] - 1000.0, 10.0)
+
+
 def test_glide_path_interpolates_linearly_then_clamps():
     start = np.array([0.8, 0.2])
     end = np.array([0.2, 0.8])
@@ -1038,6 +1058,30 @@ def test_glide_path_interpolates_linearly_then_clamps():
     assert np.allclose(mid, [0.5, 0.5])
     after = glide_path_weights(start, end, glide_path_years=10, year=15)
     assert np.allclose(after, end)
+
+
+def test_build_cashflow_series_nominal_only_without_inflation():
+    paths = np.ones((5, 4))
+    goals = [
+        {"purpose": "Withdrawal", "amount": 100.0, "is_withdrawal": True, "inflation_adjusted": False,
+         "frequency": "annually", "starts_year": 0, "ends_year": 3},
+    ]
+    series = build_cashflow_series(paths, initial_amount=1000.0, goals=goals)
+    assert len(series["cashflows_nominal"]) == 3
+    assert series["cashflows_nominal"][0] == -100.0
+    assert series["cashflows_present_dollar"] == series["cashflows_nominal"]
+
+
+def test_build_cashflow_series_present_dollar_discounts_with_inflation():
+    paths = np.ones((5, 4))
+    goals = [
+        {"purpose": "Withdrawal", "amount": 100.0, "is_withdrawal": True, "inflation_adjusted": False,
+         "frequency": "annually", "starts_year": 0, "ends_year": 3},
+    ]
+    inflation_draws = np.full((5, 3), 0.10)  # 10%/yr every path, every year
+    series = build_cashflow_series(paths, initial_amount=1000.0, goals=goals, inflation_draws=inflation_draws)
+    # Year 2 (index 1) present-dollar value is discounted by (1.10)^2 vs. nominal.
+    assert series["cashflows_present_dollar"][1] < series["cashflows_nominal"][1]
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -1067,6 +1111,17 @@ def apply_cashflow(paths: np.ndarray, initial_amount: float, cashflow: dict) -> 
     return values
 
 
+_FREQUENCY_MULTIPLIER = {"monthly": 12, "quarterly": 4, "annually": 1}
+
+
+def _annualized_goal_amount(goal: dict) -> float:
+    """A goal's `amount` is a per-occurrence figure; scale it to an annual net cashflow
+    by its frequency. A goal marked "monthly" withdraws 12x its entered amount per year,
+    not 1x -- the frontend's per-goal Frequency selector must actually change simulated
+    behavior, not just be a display label."""
+    return goal["amount"] * _FREQUENCY_MULTIPLIER[goal["frequency"]]
+
+
 def apply_named_goals(paths: np.ndarray, initial_amount: float, goals: list[dict]) -> tuple[np.ndarray, list[dict]]:
     """Apply multiple named goals in chronological order (by starts_year), tracking a
     per-goal success rate: the fraction of paths whose balance stayed >= 0 throughout the
@@ -1085,7 +1140,7 @@ def apply_named_goals(paths: np.ndarray, initial_amount: float, goals: list[dict
         for goal in goals:
             if goal["starts_year"] <= year < goal["ends_year"]:
                 sign = -1.0 if goal["is_withdrawal"] else 1.0
-                net_cashflow += sign * goal["amount"]
+                net_cashflow += sign * _annualized_goal_amount(goal)
         new_balance = grown + net_cashflow
         solvent &= new_balance >= 0
         values[:, year + 1] = np.maximum(new_balance, 0.0)
@@ -1107,19 +1162,206 @@ def glide_path_weights(start_weights: np.ndarray, end_weights: np.ndarray, glide
         return end_weights
     t = year / glide_path_years
     return start_weights * (1 - t) + end_weights * t
+
+
+def build_cashflow_series(paths: np.ndarray, initial_amount: float, goals: list[dict], inflation_draws: np.ndarray | None = None) -> dict:
+    """Per-year median net cashflow across all simulated paths, for the Goals &
+    Cashflows tab's chart. `inflation_draws` (shape (n_paths, n_years), from
+    engine/inflation.py) discounts nominal cashflows to present-dollar terms via the
+    per-path cumulative inflation factor; without it, present-dollar == nominal."""
+    n_years = paths.shape[1] - 1
+    nominal = np.zeros(n_years)
+    for year in range(n_years):
+        net = 0.0
+        for goal in goals:
+            if goal["starts_year"] <= year < goal["ends_year"]:
+                sign = -1.0 if goal["is_withdrawal"] else 1.0
+                net += sign * _annualized_goal_amount(goal)
+        nominal[year] = net
+
+    if inflation_draws is None:
+        present_dollar = nominal.copy()
+    else:
+        median_inflation = np.median(inflation_draws, axis=0)  # shape (n_years,)
+        cumulative_factor = np.cumprod(1 + median_inflation)
+        present_dollar = nominal / cumulative_factor
+
+    return {
+        "cashflows_nominal": nominal.tolist(),
+        "cashflows_present_dollar": present_dollar.tolist(),
+    }
 ```
 
 - [ ] **Step 4: Run to verify tests pass**
 
 Run: `pytest backend/tests/engine/test_goals.py -v`
-Expected: PASS (4 tests)
+Expected: PASS (7 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add backend/app/engine/goals.py backend/tests/engine/test_goals.py
-git commit -m "feat: add goals engine (named multi-goal cashflows, glide-path weights)"
+git commit -m "feat: add goals engine (frequency-scaled multi-goal cashflows, glide-path weights, cashflow series)"
 ```
+
+---
+
+## Task 8c: Glide-path multi-year orchestration (new)
+
+**Files:**
+- Create: `backend/app/engine/glide_path_orchestration.py`
+- Test: `backend/tests/engine/test_glide_path_orchestration.py`
+
+**Interfaces:**
+- Consumes: `glide_path_weights` (Task 8); any of the four `simulate_*` functions (Tasks
+  4-6) via a passed-in callable — this module does not import them directly, keeping it
+  decoupled from which model is active.
+- Produces: `simulate_with_glide_path(simulate_year_fn, start_weights: np.ndarray, end_weights: np.ndarray, glide_path_years: int, n_years: int, n_paths: int, seed: int | None) -> np.ndarray`, shape `(n_paths, n_years+1)`, normalized to start at 1.0. `simulate_year_fn(weights: np.ndarray, year_seed: int) -> np.ndarray` is a caller-supplied closure that runs the chosen model for exactly one year with a given weight vector and returns that single year's per-path growth factor, shape `(n_paths,)` (the orchestrator, Task 11, is responsible for building this closure around whichever `simulate_*` function the request selected).
+
+**Why this exists:** none of the four simulation models accept a *schedule* of weights —
+each takes one static vector for the whole horizon. Multistage/glide-path requests need
+the portfolio's weights to change every year per `glide_path_weights()`. Rather than
+modifying all four models' internals (higher risk, more surface area), this module
+composes one year at a time: call the model for year 0 with `glide_path_weights(...,
+year=0)`, chain that year's growth factor onto the running path, repeat for year 1 with
+that year's weights, and so on.
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+# backend/tests/engine/test_glide_path_orchestration.py
+import numpy as np
+from backend.app.engine.glide_path_orchestration import simulate_with_glide_path
+
+
+def test_glide_path_chains_yearly_growth_factors():
+    start_weights = np.array([0.8, 0.2])
+    end_weights = np.array([0.2, 0.8])
+
+    def fake_simulate_year(weights, year_seed):
+        # Deterministic stand-in: each year grows by (1 + weights[0] * 0.10), for a
+        # fixed number of paths -- exercises the chaining logic without needing a real
+        # simulation model.
+        return np.full(5, 1.0 + weights[0] * 0.10)
+
+    paths = simulate_with_glide_path(
+        fake_simulate_year, start_weights, end_weights,
+        glide_path_years=4, n_years=4, n_paths=5, seed=1,
+    )
+    assert paths.shape == (5, 5)
+    assert np.allclose(paths[:, 0], 1.0)
+    # Weight on asset 0 declines each year (0.8 -> 0.6 -> 0.4 -> 0.2), so each year's
+    # growth factor shrinks -- the cumulative path must be strictly concave (decelerating).
+    year_over_year_growth = paths[0, 1:] / paths[0, :-1]
+    assert np.all(np.diff(year_over_year_growth) < 0)
+
+
+def test_glide_path_matches_static_weights_when_start_equals_end():
+    same_weights = np.array([0.5, 0.5])
+
+    def fake_simulate_year(weights, year_seed):
+        return np.full(3, 1.05)
+
+    paths = simulate_with_glide_path(
+        fake_simulate_year, same_weights, same_weights,
+        glide_path_years=5, n_years=3, n_paths=3, seed=1,
+    )
+    expected = np.array([1.0, 1.05, 1.05 ** 2, 1.05 ** 3])
+    assert np.allclose(paths[0], expected)
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `pytest backend/tests/engine/test_glide_path_orchestration.py -v`
+Expected: FAIL — `ModuleNotFoundError`
+
+- [ ] **Step 3: Write `backend/app/engine/glide_path_orchestration.py`**
+
+```python
+import numpy as np
+from backend.app.engine.goals import glide_path_weights
+
+
+def simulate_with_glide_path(simulate_year_fn, start_weights: np.ndarray, end_weights: np.ndarray, glide_path_years: int, n_years: int, n_paths: int, seed: int | None = None) -> np.ndarray:
+    """Chain one-year simulations together, re-deriving that year's target weights from
+    the glide path before each call. `simulate_year_fn(weights, year_seed)` must return
+    an array of shape (n_paths,) of that year's per-path growth factor."""
+    values = np.empty((n_paths, n_years + 1))
+    values[:, 0] = 1.0
+    for year in range(n_years):
+        weights = glide_path_weights(start_weights, end_weights, glide_path_years, year)
+        year_seed = None if seed is None else seed + year
+        growth_factor = simulate_year_fn(weights, year_seed)
+        values[:, year + 1] = values[:, year] * growth_factor
+    return values
+```
+
+- [ ] **Step 4: Run to verify tests pass**
+
+Run: `pytest backend/tests/engine/test_glide_path_orchestration.py -v`
+Expected: PASS (2 tests)
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add backend/app/engine/glide_path_orchestration.py backend/tests/engine/test_glide_path_orchestration.py
+git commit -m "feat: add glide-path multi-year orchestration, composing simulate_* models per year"
+```
+
+---
+
+## Task 8b: Plan revision — Phase 1 UX/UI drift (read before touching Tasks 8-11)
+
+**Context:** Phase 1 (Tasks 14-19) ran to completion against mock data, then went through
+several rounds of design/completeness review (spec-conformance audit, PV-parity audit,
+UX design review, product-readiness review) that added real frontend behavior beyond
+what Tasks 8-11 below were originally written to produce. Tasks 8-11's code blocks below
+are updated in place to match; this section records *why*, so Phase 2 doesn't silently
+regress behind the shipped frontend.
+
+**Concretely, four gaps existed between the original Tasks 8-11 and the frontend/mock
+that's now built:**
+
+1. `percentile_table` (Task 9) only had `ending_balance`/`cagr`. The Metrics tab now
+   renders 12 rows: `ending_balance`, `ending_balance_real`, `twrr_nominal`, `twrr_real`,
+   `annual_mean_return`, `annualized_volatility`, `cagr`, `max_drawdown`,
+   `max_drawdown_excl_cashflows`, `sharpe`, `sortino`, `safe_withdrawal_rate`,
+   `perpetual_withdrawal_rate`. Task 9 below adds the missing 6 percentile-band keys.
+2. The Risk & Correlation tab needs three tables — `expected_return_by_horizon`,
+   `annual_return_probability`, `loss_probability` — that had no engine functions at
+   all. Task 9 below adds all three.
+3. `apply_named_goals` (Task 8) treated `goal["amount"]` as a flat per-year figure,
+   ignoring the `frequency` field the schema and frontend already carry (a goal marked
+   "monthly" withdraws 12x the entered amount per year, not 1x). Task 8's code below is
+   corrected. A `build_cashflow_series` function is added for the Goals tab's cashflow
+   chart, which had no backing engine function before.
+4. **Architectural gap, not just a missing field:** none of the four simulation models
+   (`simulate_historical`/`simulate_forecasted`/`simulate_parameterized`/
+   `simulate_statistical`, Tasks 4-6) accept a *schedule* of weights — each takes one
+   static `weights` vector for the whole horizon. `glide_path_weights()` (Task 8)
+   produces a different weight vector per year, but nothing ever called it. Multistage
+   planning (`years_to_retirement`/`glide_path_years`/`retirement_holdings`, now live in
+   the frontend's Parameters step) has no engine support at all. Task 8b below adds a
+   new orchestration function, `simulate_with_glide_path`, that re-invokes whichever
+   `simulate_*` function was chosen once per year with that year's interpolated
+   weights, chaining the resulting single-year growth factors into one multi-year path
+   array — **Tasks 4-6's individual model functions are not modified**; the composition
+   happens one layer up, in the orchestrator, keeping each model's own logic untouched
+   and low-risk.
+
+`cashflow_mode` (Task 10's `SimulateRequest`) is widened from 4 to 7 literal values to
+match the frontend's Cashflow dropdown (`rolling_average_spending`,
+`geometric_spending`, `withdraw_life_expectancy` added) — see Task 10 below.
+`SimulateResponse`'s per-section fields are already untyped `dict`s, so no schema
+change is needed there; only the *content* the orchestrator populates changes (Task 11
+below).
+
+**Files touched by this revision:** `backend/app/engine/goals.py` (Task 8, extended),
+new `backend/app/engine/glide_path_orchestration.py` (Task 8c, new),
+`backend/app/engine/results.py` (Task 9, extended), `backend/app/domain/schemas.py`
+(Task 10, `cashflow_mode` widened), `backend/app/engine/orchestrator.py` (Task 11,
+rewritten to call the new functions and wire glide-path + inflation-adjusted-balance
+support).
 
 ---
 
@@ -1132,13 +1374,16 @@ git commit -m "feat: add goals engine (named multi-goal cashflows, glide-path we
 **Interfaces:**
 - Consumes: nothing from earlier tasks (pure numpy/pandas on already-simulated path arrays).
 - Produces:
-  - `percentile_table(paths: np.ndarray, initial_amount: float) -> dict` — `{"ending_balance": {10: ..., 25: ..., 50: ..., 75: ..., 90: ...}, "cagr": {...}}`.
+  - `percentile_table(paths: np.ndarray, initial_amount: float, inflation_draws: np.ndarray | None = None, growth_only_paths: np.ndarray | None = None) -> dict` — 8 percentile-banded keys: `ending_balance`, `ending_balance_real` (inflation-adjusted via `inflation_draws` if supplied, else equals nominal), `cagr`, `twrr_nominal`, `twrr_real`, `annual_mean_return`, `annualized_volatility`, `max_drawdown`, `max_drawdown_excl_cashflows` (computed from `growth_only_paths` — the pre-cashflow path array — if supplied, else falls back to `max_drawdown`). Each value is `{10: ..., 25: ..., 50: ..., 75: ..., 90: ...}`.
   - `parametric_var_es(weights, mu, sigma, alpha=0.90) -> tuple[float, float]`.
   - `compute_var_es(ending_values: np.ndarray, alpha=0.90) -> tuple[float, float]`.
   - `sharpe_sortino_by_percentile(paths: np.ndarray, risk_free_rate: float = 0.0) -> dict` — per-path annualized return/vol → Sharpe/Sortino, then percentile-banded (10/25/50/75/90) across paths.
   - `withdrawal_rates_by_percentile(paths: np.ndarray, n_years: int) -> dict` — Safe Withdrawal Rate (largest constant annual withdrawal rate that doesn't deplete the portfolio before `n_years`, found via bisection per path) and Perpetual Withdrawal Rate (`median_annual_return - median_annual_volatility^2/2` style closed-form, percentile-banded), both keyed by the same 5 percentiles.
   - `survival_series(paths: np.ndarray) -> np.ndarray` — shape `(n_years+1,)`, fraction of paths with balance > 0 at each year.
   - `correlation_and_returns_table(returns_df: pd.DataFrame, asset_names: list[str]) -> dict` — correlation matrix plus per-asset CAGR/expected return/volatility.
+  - `expected_return_by_horizon(paths: np.ndarray, horizons: list[int] = [1,3,5,10,15,20,25,30]) -> dict` — keyed `[str(horizon)][percentile]`, annualized return over each horizon (horizons beyond the path's actual length are skipped).
+  - `annual_return_probability(paths: np.ndarray, horizons: list[int] = [...], thresholds: list[float] = [0.0,0.025,0.05,0.075,0.10,0.125]) -> dict` — keyed `[">= X.XX%"][str(horizon)]`, probability annualized return over that horizon meets or exceeds the threshold.
+  - `loss_probability(paths: np.ndarray, growth_only_paths: np.ndarray | None = None, thresholds: list[float] = [...]) -> dict` — `{"excluding_cashflows": {"within_period": {...}, "end_of_period": {...}}, "including_cashflows": {...}}`, each inner dict keyed by the same threshold labels, values are probabilities.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1150,6 +1395,7 @@ from backend.app.engine.results import (
     percentile_table, parametric_var_es, compute_var_es,
     sharpe_sortino_by_percentile, withdrawal_rates_by_percentile,
     survival_series, correlation_and_returns_table,
+    expected_return_by_horizon, annual_return_probability, loss_probability,
 )
 
 
@@ -1160,10 +1406,55 @@ def _sample_paths(seed=0, n_paths=500, n_years=10):
     return np.hstack([np.ones((n_paths, 1)), growth])
 
 
-def test_percentile_table_has_five_bands():
+def test_percentile_table_has_all_eight_metrics_with_five_bands():
     table = percentile_table(_sample_paths(), initial_amount=1000.0)
-    assert set(table["ending_balance"].keys()) == {10, 25, 50, 75, 90}
+    expected_keys = {
+        "ending_balance", "ending_balance_real", "cagr", "twrr_nominal", "twrr_real",
+        "annual_mean_return", "annualized_volatility", "max_drawdown", "max_drawdown_excl_cashflows",
+    }
+    assert set(table.keys()) == expected_keys
+    for key in expected_keys:
+        assert set(table[key].keys()) == {10, 25, 50, 75, 90}
     assert table["ending_balance"][50] > 0
+    assert table["max_drawdown"][50] <= 0  # drawdowns are non-positive
+
+
+def test_percentile_table_ending_balance_real_uses_inflation_draws():
+    paths = _sample_paths()
+    n_years = paths.shape[1] - 1
+    inflation_draws = np.full((paths.shape[0], n_years), 0.10)  # 10%/yr every path
+    table_no_inflation = percentile_table(paths, initial_amount=1000.0)
+    table_with_inflation = percentile_table(paths, initial_amount=1000.0, inflation_draws=inflation_draws)
+    # 10%/yr inflation over 10 years must discount the real ending balance well below nominal.
+    assert table_with_inflation["ending_balance_real"][50] < table_no_inflation["ending_balance"][50]
+
+
+def test_percentile_table_max_drawdown_excl_cashflows_uses_growth_only_paths():
+    paths = _sample_paths(seed=1)
+    # A pathset with a large synthetic mid-horizon dip simulates a cashflow-driven drawdown
+    # that shouldn't appear in the "excl. cashflows" figure when growth_only_paths is flat.
+    growth_only = np.ones_like(paths)
+    table = percentile_table(paths, initial_amount=1000.0, growth_only_paths=growth_only)
+    assert table["max_drawdown_excl_cashflows"][50] == 0.0
+
+
+def test_expected_return_by_horizon_skips_horizons_beyond_path_length():
+    table = expected_return_by_horizon(_sample_paths(n_years=5), horizons=[1, 3, 5, 10])
+    assert set(table.keys()) == {"1", "3", "5"}
+    for h in table:
+        assert set(table[h].keys()) == {10, 25, 50, 75, 90}
+
+
+def test_annual_return_probability_decreases_as_threshold_rises():
+    table = annual_return_probability(_sample_paths(), horizons=[5], thresholds=[0.0, 0.10])
+    assert table[">= 0.00%"]["5"] >= table[">= 10.00%"]["5"]
+
+
+def test_loss_probability_has_four_quadrants():
+    paths = _sample_paths()
+    table = loss_probability(paths)
+    assert set(table.keys()) == {"excluding_cashflows", "including_cashflows"}
+    assert set(table["excluding_cashflows"].keys()) == {"within_period", "end_of_period"}
 
 
 def test_parametric_and_empirical_var_es_are_positive_losses():
@@ -1222,14 +1513,92 @@ from scipy.optimize import brentq
 _PCTS = [10, 25, 50, 75, 90]
 
 
-def percentile_table(paths: np.ndarray, initial_amount: float) -> dict:
+def _percentile_band(values: np.ndarray) -> dict:
+    return {p: float(np.percentile(values, p)) for p in _PCTS}
+
+
+def percentile_table(paths: np.ndarray, initial_amount: float, inflation_draws: np.ndarray | None = None, growth_only_paths: np.ndarray | None = None) -> dict:
     ending = paths[:, -1] * initial_amount
     n_years = paths.shape[1] - 1
     cagr = paths[:, -1] ** (1 / n_years) - 1
+    per_period_returns = paths[:, 1:] / paths[:, :-1] - 1
+    annual_mean_return = per_period_returns.mean(axis=1)
+    annualized_volatility = per_period_returns.std(axis=1)
+    # TWRR strips cashflow timing by construction (it's a ratio of period-end to
+    # period-start values) -- on this array, nominal TWRR and CAGR coincide.
+    twrr_nominal = cagr
+
+    running_max = np.maximum.accumulate(paths, axis=1)
+    max_drawdown = (paths / running_max - 1).min(axis=1)
+
+    if growth_only_paths is not None:
+        running_max_g = np.maximum.accumulate(growth_only_paths, axis=1)
+        max_drawdown_excl_cashflows = (growth_only_paths / running_max_g - 1).min(axis=1)
+    else:
+        max_drawdown_excl_cashflows = max_drawdown
+
+    if inflation_draws is not None:
+        cumulative_inflation = np.prod(1 + inflation_draws, axis=1)
+        ending_real = ending / cumulative_inflation
+        twrr_real = (ending_real / initial_amount) ** (1 / n_years) - 1
+    else:
+        ending_real = ending
+        twrr_real = cagr
+
     return {
-        "ending_balance": {p: float(np.percentile(ending, p)) for p in _PCTS},
-        "cagr": {p: float(np.percentile(cagr, p)) for p in _PCTS},
+        "ending_balance": _percentile_band(ending),
+        "ending_balance_real": _percentile_band(ending_real),
+        "cagr": _percentile_band(cagr),
+        "twrr_nominal": _percentile_band(twrr_nominal),
+        "twrr_real": _percentile_band(twrr_real),
+        "annual_mean_return": _percentile_band(annual_mean_return),
+        "annualized_volatility": _percentile_band(annualized_volatility),
+        "max_drawdown": _percentile_band(max_drawdown),
+        "max_drawdown_excl_cashflows": _percentile_band(max_drawdown_excl_cashflows),
     }
+
+
+def expected_return_by_horizon(paths: np.ndarray, horizons: list[int] = [1, 3, 5, 10, 15, 20, 25, 30]) -> dict:
+    n_years = paths.shape[1] - 1
+    result = {}
+    for h in horizons:
+        if h > n_years:
+            continue
+        annualized = paths[:, h] ** (1 / h) - 1
+        result[str(h)] = _percentile_band(annualized)
+    return result
+
+
+def annual_return_probability(paths: np.ndarray, horizons: list[int] = [1, 3, 5, 10, 15, 20, 25, 30], thresholds: list[float] = [0.0, 0.025, 0.05, 0.075, 0.10, 0.125]) -> dict:
+    n_years = paths.shape[1] - 1
+    result = {}
+    for t in thresholds:
+        label = f">= {t * 100:.2f}%"
+        row = {}
+        for h in horizons:
+            if h > n_years:
+                continue
+            annualized = paths[:, h] ** (1 / h) - 1
+            row[str(h)] = float((annualized >= t).mean())
+        result[label] = row
+    return result
+
+
+def loss_probability(paths: np.ndarray, growth_only_paths: np.ndarray | None = None, thresholds: list[float] = [0.0, 0.025, 0.05, 0.075, 0.10, 0.125]) -> dict:
+    def _for_pathset(pset: np.ndarray) -> dict:
+        running_max = np.maximum.accumulate(pset, axis=1)
+        drawdown = 1 - pset / running_max
+        end_loss = 1 - pset[:, -1] / pset[:, 0]
+        within, end = {}, {}
+        for t in thresholds:
+            label = f">= {t * 100:.2f}%"
+            within[label] = float((drawdown.max(axis=1) >= t).mean())
+            end[label] = float((end_loss >= t).mean())
+        return {"within_period": within, "end_of_period": end}
+
+    excl = _for_pathset(growth_only_paths if growth_only_paths is not None else paths)
+    incl = _for_pathset(paths)
+    return {"excluding_cashflows": excl, "including_cashflows": incl}
 
 
 def parametric_var_es(weights: np.ndarray, mu: np.ndarray, sigma: np.ndarray, alpha: float = 0.90) -> tuple[float, float]:
@@ -1315,13 +1684,13 @@ def correlation_and_returns_table(returns_df: pd.DataFrame, asset_names: list[st
 - [ ] **Step 4: Run to verify tests pass**
 
 Run: `pytest backend/tests/engine/test_results.py -v`
-Expected: PASS (6 tests)
+Expected: PASS (11 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add backend/app/engine/results.py backend/tests/engine/test_results.py
-git commit -m "feat: results engine with Sharpe/Sortino/SWR/PWR, survival series, correlation table"
+git commit -m "feat: results engine with full 8-metric percentile table, horizon/return/loss probability tables"
 ```
 
 ---
@@ -1451,8 +1820,13 @@ class SimulateRequest(BaseModel):
     expected_return: Optional[float] = None
     expected_volatility: Optional[float] = None
 
-    # Cashflow (single, default mode)
-    cashflow_mode: Literal["none", "contribute", "withdraw_fixed", "withdraw_percent"] = "none"
+    # Cashflow (single, default mode) -- 7 modes to match the frontend's Cashflow
+    # dropdown (Task 17's ParametersStep). The 3 added beyond the original 4
+    # (rolling_average_spending, geometric_spending, withdraw_life_expectancy) do not
+    # yet have engine support in engine/goals.py -- Task 8b's orchestrator wiring below
+    # treats them as withdraw_fixed for now and this is flagged as a known follow-up,
+    # not silently dropped.
+    cashflow_mode: Literal["none", "contribute", "withdraw_fixed", "withdraw_percent", "rolling_average_spending", "geometric_spending", "withdraw_life_expectancy"] = "none"
     cashflow_amount: Optional[float] = None
     cashflow_inflation_adjusted: Optional[bool] = None
     cashflow_frequency: Optional[Literal["monthly", "quarterly", "annually"]] = None
@@ -1511,7 +1885,7 @@ Expected: PASS (3 tests)
 
 ```bash
 git add backend/app/domain backend/tests/domain
-git commit -m "feat: add SimulateRequest/SimulateResponse Pydantic schemas"
+git commit -m "feat: add SimulateRequest/SimulateResponse schemas with 7-mode cashflow"
 ```
 
 ---
@@ -1523,8 +1897,12 @@ git commit -m "feat: add SimulateRequest/SimulateResponse Pydantic schemas"
 - Test: `backend/tests/engine/test_orchestrator.py`
 
 **Interfaces:**
-- Consumes: every `engine/*` module from Tasks 2, 4, 5, 6, 7, 8, 9; `SimulateRequest`/`SimulateResponse` from Task 10; `estimate_mu_sigma` from `backend.app.data.returns` (Task 3).
-- Produces: `run_simulation(request: SimulateRequest, returns_df: pd.DataFrame) -> SimulateResponse` — the single function the API layer calls. Dispatches to the correct `engine/*.simulate_*` function by `request.simulation_model`, applies cashflow/goals via `engine/goals.py`, computes every `engine/results.py` metric, and assembles the response sections.
+- Consumes: every `engine/*` module from Tasks 2, 4, 5, 6, 7, 8, 8c, 9; `SimulateRequest`/`SimulateResponse` from Task 10; `estimate_mu_sigma` from `backend.app.data.returns` (Task 3).
+- Produces: `run_simulation(request: SimulateRequest, returns_df: pd.DataFrame) -> SimulateResponse` — the single function the API layer calls. Dispatches to the correct `engine/*.simulate_*` function by `request.simulation_model` (or, when multistage/glide-path fields are present, composes that same model one year at a time via `engine/glide_path_orchestration.simulate_with_glide_path`), applies cashflow/goals via `engine/goals.py` (frequency-scaled), computes the full 8-metric `percentile_table` plus the 3 horizon/probability tables from `engine/results.py`, and assembles all 6 response sections (`overview`, `growth`, `distribution`, `metrics`, `risk`, `goals`).
+
+**Known follow-up, not blocking Phase 2:** `cashflow_mode`'s 3 newer values (`rolling_average_spending`, `geometric_spending`, `withdraw_life_expectancy`) don't have dedicated engine logic yet — the orchestrator below treats all `withdraw_*`-prefixed modes as a fixed-amount withdrawal (same as `withdraw_fixed`) so the endpoint never crashes on a valid request, but the *behavior* of those 3 modes isn't yet distinct from a plain fixed withdrawal. This is a real content gap (the withdrawal amount won't actually track a rolling average, a geometric rule, or a life-expectancy table), not a silent one — flagged here and in the schema comment (Task 10) so it surfaces in code review rather than being discovered by a user later. Building real support for these three is a good candidate for a follow-up task once the rest of Phase 2 is verified working end-to-end.
+
+**Known follow-up, not blocking Phase 2:** Historical inflation (`inflation_model="historical"`) has no real Thai CPI series wired into `engine/data/` yet (this was already an open item in the original spec, §10). The orchestrator below uses a documented placeholder draw (Normal, 3% mean / 1.3% vol — roughly Thailand's recent long-run CPI behavior) instead of resampling real historical CPI. Parameterized inflation (user-supplied mean/vol) is fully real and uses `engine/inflation.py` as designed. Replacing the placeholder with a real CPI data source is a follow-up task, not a Phase 2 blocker.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1570,6 +1948,50 @@ def test_parameterized_request_skips_data_estimation():
     )
     response = run_simulation(req, _returns_df())
     assert response.metrics["percentile_table"]["ending_balance"][50] > 0
+
+
+def test_percentile_table_has_all_eight_metrics_end_to_end():
+    req = SimulateRequest(
+        holdings=[Holding(proj_id="M0027_2535", weight=60.0), Holding(proj_id="M0209_2548", weight=40.0)],
+        initial_amount=1_000_000, simulation_period_years=10, tax_treatment="pre_tax",
+        simulation_model="historical", n_paths=500, seed=1, rebalancing="annual",
+        bootstrap_model="single_year", use_full_history=True, sequence_of_returns_risk=0,
+        inflation_model="historical",
+    )
+    response = run_simulation(req, _returns_df())
+    expected_keys = {
+        "ending_balance", "ending_balance_real", "cagr", "twrr_nominal", "twrr_real",
+        "annual_mean_return", "annualized_volatility", "max_drawdown", "max_drawdown_excl_cashflows",
+    }
+    assert set(response.metrics["percentile_table"].keys()) == expected_keys
+    assert "expected_return_by_horizon" in response.risk
+    assert "annual_return_probability" in response.risk
+    assert "loss_probability" in response.risk
+
+
+def test_multistage_glide_path_request_produces_goals_section_with_glide_path():
+    req = SimulateRequest(
+        holdings=[Holding(proj_id="M0027_2535", weight=60.0), Holding(proj_id="M0209_2548", weight=40.0)],
+        initial_amount=1_000_000, simulation_period_years=10, tax_treatment="pre_tax",
+        simulation_model="historical", n_paths=200, seed=1, rebalancing="annual",
+        bootstrap_model="single_year", use_full_history=True, sequence_of_returns_risk=0,
+        inflation_model="parameterized", inflation_mean=0.03, inflation_volatility=0.01,
+        multi_goal_enabled=True,
+        goals=[{"purpose": "Retirement", "is_withdrawal": True, "amount": 5000.0,
+                "inflation_adjusted": False, "frequency": "monthly", "starts_year": 5, "ends_year": 10}],
+        years_to_retirement=5, glide_path_years=3,
+        retirement_holdings=[Holding(proj_id="M0027_2535", weight=20.0), Holding(proj_id="M0209_2548", weight=80.0)],
+    )
+    response = run_simulation(req, _returns_df())
+    assert response.goals is not None
+    assert "glide_path" in response.goals
+    assert response.goals["glide_path"]["years"] == list(range(11))
+    allocations = response.goals["glide_path"]["allocations"]
+    # Weight on M0027_2535 must decline from the start allocation (0.60) toward the
+    # retirement allocation (0.20) as the glide path progresses.
+    assert allocations["M0027_2535"][0] == 0.6
+    assert allocations["M0027_2535"][3] == 0.2  # fully transitioned by glide_path_years=3
+    assert "cashflows_nominal" in response.goals
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -1589,12 +2011,21 @@ from backend.app.engine.forecasted import simulate_forecasted
 from backend.app.engine.statistical import simulate_statistical
 from backend.app.engine.parameterized import simulate_parameterized
 from backend.app.engine.inflation import simulate_inflation
-from backend.app.engine.goals import apply_cashflow, apply_named_goals
+from backend.app.engine.goals import apply_cashflow, apply_named_goals, glide_path_weights, build_cashflow_series
+from backend.app.engine.glide_path_orchestration import simulate_with_glide_path
 from backend.app.engine.results import (
     percentile_table, sharpe_sortino_by_percentile, withdrawal_rates_by_percentile,
     survival_series, correlation_and_returns_table, compute_var_es,
+    expected_return_by_horizon, annual_return_probability, loss_probability,
 )
 from backend.app.domain.schemas import SimulateRequest, SimulateResponse
+
+# Historical inflation has no real Thai CPI series wired in yet (spec's open item --
+# see Task 11's "Known follow-up" note above). This placeholder approximates recent
+# Thai CPI behavior until a real series is sourced; parameterized inflation (user
+# input) does not use this constant at all.
+_PLACEHOLDER_HISTORICAL_INFLATION_MEAN = 0.03
+_PLACEHOLDER_HISTORICAL_INFLATION_VOL = 0.013
 
 
 def run_simulation(request: SimulateRequest, returns_df: pd.DataFrame) -> SimulateResponse:
@@ -1604,8 +2035,22 @@ def run_simulation(request: SimulateRequest, returns_df: pd.DataFrame) -> Simula
     mu, sigma = estimate_mu_sigma(subset)
 
     config = _build_engine_config(request)
+    is_multistage = bool(
+        request.multi_goal_enabled
+        and request.years_to_retirement is not None
+        and request.glide_path_years is not None
+        and request.retirement_holdings
+    )
 
-    if request.simulation_model == "historical":
+    if is_multistage:
+        retirement_weights = np.array([h.weight for h in request.retirement_holdings]) / 100.0
+        year_simulator = _make_year_simulator(request, config, mu, sigma, subset)
+        growth_paths = simulate_with_glide_path(
+            year_simulator, weights, retirement_weights,
+            glide_path_years=request.glide_path_years,
+            n_years=request.simulation_period_years, n_paths=request.n_paths, seed=request.seed,
+        )
+    elif request.simulation_model == "historical":
         growth_paths = simulate_historical(subset, weights, config)
     elif request.simulation_model == "forecasted":
         growth_paths = simulate_forecasted(mu, sigma, weights, config, returns_df=subset)
@@ -1617,13 +2062,17 @@ def run_simulation(request: SimulateRequest, returns_df: pd.DataFrame) -> Simula
         raise ValueError(f"unknown simulation_model: {request.simulation_model}")
 
     goals_summary = None
+    goal_dicts: list[dict] = []
     if request.multi_goal_enabled and request.goals:
         goal_dicts = [g.model_dump() for g in request.goals]
         dollar_paths, goals_summary = apply_named_goals(growth_paths, request.initial_amount, goal_dicts)
     elif request.cashflow_mode != "none":
+        # rolling_average_spending / geometric_spending / withdraw_life_expectancy are
+        # not yet distinctly implemented (see Task 11's "Known follow-up" note) -- they
+        # fall through to the same fixed-amount treatment as withdraw_fixed for now.
         cashflow = {
             "amount": request.cashflow_amount or 0.0,
-            "is_withdrawal": request.cashflow_mode.startswith("withdraw"),
+            "is_withdrawal": request.cashflow_mode != "contribute",
             "inflation_adjusted": bool(request.cashflow_inflation_adjusted),
             "frequency": request.cashflow_frequency or "annually",
         }
@@ -1632,7 +2081,12 @@ def run_simulation(request: SimulateRequest, returns_df: pd.DataFrame) -> Simula
         dollar_paths = growth_paths * request.initial_amount
 
     normalized_paths = dollar_paths / request.initial_amount
-    pct_table = percentile_table(normalized_paths, request.initial_amount)
+    inflation_draws = _simulate_inflation_draws(request)
+
+    pct_table = percentile_table(
+        normalized_paths, request.initial_amount,
+        inflation_draws=inflation_draws, growth_only_paths=growth_paths,
+    )
     sharpe_sortino = sharpe_sortino_by_percentile(normalized_paths)
     withdrawal_rates = withdrawal_rates_by_percentile(normalized_paths, request.simulation_period_years)
     survival = survival_series(dollar_paths)
@@ -1668,13 +2122,72 @@ def run_simulation(request: SimulateRequest, returns_df: pd.DataFrame) -> Simula
         "correlation_and_returns": corr_table,
         "value_at_risk": var,
         "expected_shortfall": es,
+        "expected_return_by_horizon": expected_return_by_horizon(normalized_paths),
+        "annual_return_probability": annual_return_probability(normalized_paths),
+        "loss_probability": loss_probability(normalized_paths, growth_only_paths=growth_paths),
     }
-    goals_section = {"summary": goals_summary} if goals_summary is not None else None
+
+    goals_section = None
+    if goals_summary is not None:
+        goals_section = {
+            "summary": goals_summary,
+            **build_cashflow_series(growth_paths, request.initial_amount, goal_dicts, inflation_draws=inflation_draws),
+        }
+        if is_multistage:
+            years_axis = list(range(request.simulation_period_years + 1))
+            allocations = {
+                proj_id: [
+                    float(glide_path_weights(weights, retirement_weights, request.glide_path_years, y)[i])
+                    for y in years_axis
+                ]
+                for i, proj_id in enumerate(proj_ids)
+            }
+            goals_section["glide_path"] = {"years": years_axis, "allocations": allocations}
 
     return SimulateResponse(
         overview=overview, growth=growth, distribution=distribution,
         metrics=metrics, risk=risk, goals=goals_section,
         run_config=request.model_dump(),
+    )
+
+
+def _make_year_simulator(request: SimulateRequest, config: dict, mu, sigma, subset):
+    """Build a `simulate_year_fn(weights, year_seed) -> growth_factor[n_paths]` closure
+    around whichever simulation model the request selected, for
+    `glide_path_orchestration.simulate_with_glide_path` to call once per year. Every
+    `simulate_*` model normalizes its output to start at 1.0, so running any of them
+    with `simulation_period_years=1` and reading `paths[:, 1]` yields exactly that
+    year's per-path growth factor, regardless of which model it is."""
+    def simulate_year(weights: np.ndarray, year_seed: int | None) -> np.ndarray:
+        year_config = dict(config, simulation_period_years=1, seed=year_seed)
+        if request.simulation_model == "historical":
+            paths = simulate_historical(subset, weights, year_config)
+        elif request.simulation_model == "forecasted":
+            paths = simulate_forecasted(mu, sigma, weights, year_config, returns_df=subset)
+        elif request.simulation_model == "statistical":
+            paths = simulate_statistical(mu, sigma, weights, year_config, returns_df=subset)
+        elif request.simulation_model == "parameterized":
+            paths = simulate_parameterized(year_config)
+        else:
+            raise ValueError(f"unknown simulation_model: {request.simulation_model}")
+        return paths[:, 1]
+    return simulate_year
+
+
+def _simulate_inflation_draws(request: SimulateRequest) -> np.ndarray:
+    rng = np.random.default_rng(request.seed)
+    if request.inflation_model == "historical":
+        return rng.normal(
+            _PLACEHOLDER_HISTORICAL_INFLATION_MEAN, _PLACEHOLDER_HISTORICAL_INFLATION_VOL,
+            size=(request.n_paths, request.simulation_period_years),
+        )
+    return simulate_inflation(
+        {
+            "inflation_model": "parameterized",
+            "inflation_mean": request.inflation_mean if request.inflation_mean is not None else 0.03,
+            "inflation_volatility": request.inflation_volatility if request.inflation_volatility is not None else 0.01,
+        },
+        n_paths=request.n_paths, n_years=request.simulation_period_years, rng=rng,
     )
 
 
@@ -1698,13 +2211,13 @@ def _build_engine_config(request: SimulateRequest) -> dict:
 - [ ] **Step 4: Run to verify tests pass**
 
 Run: `pytest backend/tests/engine/test_orchestrator.py -v`
-Expected: PASS (2 tests)
+Expected: PASS (4 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add backend/app/engine/orchestrator.py backend/tests/engine/test_orchestrator.py
-git commit -m "feat: add simulation orchestrator tying engine modules to SimulateRequest/Response"
+git commit -m "feat: orchestrator with full metrics, horizon/probability tables, glide-path composition"
 ```
 
 ---
@@ -3193,3 +3706,20 @@ git commit -m "chore: remove superseded tests/*.py engine source now that backen
 **Spec coverage:** §3 (models) — Tasks 2, 4, 5, 6. §4 (Parameters tab) — Task 17. §5 (Results tab, 7 sub-tabs) — Task 18. §6 (new engine work, all 7 items) — Tasks 5, 6, 7, 8, 9. §7 (architecture/promotion map) — Tasks 2–13, 22. §8 (frontend shell + chart primitives + weight actions) — Tasks 14, 15, 16. §9 (testing) — every task's TDD steps plus Task 21. §10 (open items) — Thai CPI data source remains genuinely open; Task 7's `inflation.py` is deliberately designed to accept any `cpi_returns` series so this can be resolved later without reworking the engine.
 
 **Type consistency check:** `SimulateRequest`/`SimulateResponse` (Task 10, Python) and their TypeScript mirrors (Task 16) were kept field-for-field identical by construction. `run_simulation`'s signature (Task 11) matches its usage in `api/simulate.py` (Task 12). The one acknowledged gap is `PortfolioStep`'s exact prop shape (Task 16 ports it from an unseen-in-full source file) versus its call site in `App.tsx` (Task 19) — flagged explicitly in Task 19 rather than fabricated, since guessing wrong here would silently produce a plan a reviewer couldn't verify against real source.
+
+**Post-Phase-1 revision (post-dated addendum):** Phase 1 (Tasks 14-19) went through several
+rounds of design/completeness review after the plan above was first written, and the
+shipped frontend/mock ended up needing more from the backend than Tasks 8-11 originally
+specified. Task 8b (new) documents the four concrete gaps found; Tasks 8, 9, 10, 11 above
+are updated in place (not left as a separate patch) to match what `mockData.ts` and
+`ResultsView.tsx` actually produce/consume as of the Phase 1 completeness/UX/product-
+readiness review rounds. New Task 8c (`glide_path_orchestration.py`) was added rather
+than modifying Tasks 4-6's individual model functions, to keep the multistage/glide-path
+composition isolated and low-risk. Two items are explicitly flagged as follow-ups rather
+than blockers: (1) three cashflow modes (`rolling_average_spending`,
+`geometric_spending`, `withdraw_life_expectancy`) fall back to fixed-withdrawal behavior
+until they get dedicated engine logic; (2) historical inflation uses a documented
+placeholder draw until a real Thai CPI series is sourced (the original open item from
+the spec, never resolved). Both are safe to defer — they don't block any other Phase 2
+task, don't crash on any valid request, and are called out in code comments at their
+exact location so they surface in review rather than being discovered by a user.
