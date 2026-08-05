@@ -7,7 +7,7 @@ const API_BASE = "/api";
 // (real backend wired in). Flip via VITE_USE_MOCK=false in .env.local, or the Task 19b
 // wiring step removes the mock branch entirely once the backend is ready. No component
 // that imports postSimulate/getFunds needs to change either way.
-const USE_MOCK = import.meta.env.VITE_USE_MOCK !== "false";
+const USE_MOCK = import.meta.env.VITE_USE_MOCK === "true";
 
 export async function postSimulate(request: SimulateRequest): Promise<SimulateResponse> {
   if (USE_MOCK) {
