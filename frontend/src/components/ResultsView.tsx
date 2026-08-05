@@ -205,8 +205,7 @@ function GrowthTab({ result }: { result: SimulateResponse }) {
     },
   ];
   return (
-    <div className="card">
-      <h2>Growth</h2>
+    <div className="panelGrid">
       <AxisCurve
         title="Simulated Portfolio Balances"
         series={fanSeries}
