@@ -21,6 +21,15 @@ const DEFAULT_REQUEST: SimulateRequest = {
   cashflow_mode: "none",
   multi_goal_enabled: false,
   inflation_model: "historical",
+  // Parameterized model requires distribution/expected_return/expected_volatility
+  // server-side (backend/app/domain/schemas.py). The Parameters form renders
+  // "Normal" as the visible default for the Distribution select, but a <select>
+  // only fires onChange on user interaction, so without a real default here the
+  // field stayed undefined in the request payload until the user touched the
+  // dropdown -- causing a 422 from the real backend the first time someone chose
+  // Parameterized Returns and just clicked through (mock mode never caught this
+  // because it doesn't validate the request against the schema).
+  distribution: "normal",
 };
 
 const STEPS = ["portfolio", "parameters", "results"] as const;
