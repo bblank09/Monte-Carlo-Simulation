@@ -251,16 +251,18 @@ function DistributionTab({ result }: { result: SimulateResponse }) {
     ? buildHistogramBins(distribution.max_drawdown_histogram, 20, (v) => pctString(v, 1))
     : [];
   return (
-    <div className="card">
-      <h2>Distribution</h2>
-      <p>Distribution of the simulated portfolio's total return (ending balance vs. initial amount) across all paths.</p>
-      <Histogram rows={bins} />
+    <div className="panelGrid">
+      <section className="chartPanel">
+        <h3>Ending Balance Distribution</h3>
+        <p>Distribution of the simulated portfolio's total return (ending balance vs. initial amount) across all paths.</p>
+        <Histogram rows={bins} />
+      </section>
       {drawdownBins.length ? (
-        <>
+        <section className="chartPanel">
           <h3>Max Drawdown Distribution</h3>
           <p>Distribution of each simulated path's worst peak-to-trough drawdown.</p>
           <Histogram rows={drawdownBins} />
-        </>
+        </section>
       ) : null}
     </div>
   );
@@ -349,10 +351,10 @@ function metricsSection(metrics: MetricsData): TableSection {
 function MetricsTab({ result }: { result: SimulateResponse }) {
   const metrics = result.metrics as unknown as MetricsData;
   return (
-    <div className="card">
-      <h2>Metrics</h2>
+    <section className="chartPanel">
+      <h3>Performance Summary</h3>
       <DataTable caption="Performance Summary" section={metricsSection(metrics)} />
-    </div>
+    </section>
   );
 }
 
@@ -430,8 +432,7 @@ function RiskTab({ result }: { result: SimulateResponse }) {
     }),
   };
   return (
-    <div className="card">
-      <h2>Risk &amp; Correlation</h2>
+    <div className="tabStack">
       <div className="metricGrid">
         <div className="metricCard">
           <span>Value at Risk (90%)</span>
@@ -453,28 +454,28 @@ function RiskTab({ result }: { result: SimulateResponse }) {
         </div>
       </div>
       {risk.expected_return_by_horizon ? (
-        <>
+        <section className="chartPanel">
           <h3>Expected Annual Return by Horizon</h3>
           <DataTable
             caption="Expected Annual Return by Horizon"
             section={expectedReturnByHorizonSection(risk.expected_return_by_horizon)}
           />
-        </>
+        </section>
       ) : null}
       {risk.annual_return_probability ? (
-        <>
+        <section className="chartPanel">
           <h3>Annual Return Probability</h3>
           <DataTable
             caption="Annual Return Probability"
             section={annualReturnProbabilitySection(risk.annual_return_probability)}
           />
-        </>
+        </section>
       ) : null}
       {risk.loss_probability ? (
-        <>
+        <section className="chartPanel">
           <h3>Loss Probability</h3>
           <DataTable caption="Loss Probability" section={lossProbabilitySection(risk.loss_probability)} />
-        </>
+        </section>
       ) : null}
     </div>
   );
