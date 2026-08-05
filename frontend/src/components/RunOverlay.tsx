@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-const STAGES = ["Validating inputs", "Loading SEC NAV cache", "Computing backtest", "Preparing report"];
+const STAGES = ["Validating inputs", "Loading SEC NAV cache", "Running simulation paths", "Preparing report"];
 
 interface Props {
   open: boolean;
@@ -25,7 +25,7 @@ export function RunOverlay({ open }: Props) {
   return (
     <div className="run-overlay open">
       <div className="run-panel">
-        <h4>Running backtest&hellip;</h4>
+        <h4>Running simulation&hellip;</h4>
         <div className="run-steps">
           {STAGES.map((stage, index) => (
             <div className={index < activeStage ? "run-step done" : index === activeStage ? "run-step active" : "run-step"} key={stage}>
