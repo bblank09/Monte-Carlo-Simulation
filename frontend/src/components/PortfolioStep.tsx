@@ -15,15 +15,37 @@ interface Facet {
   count: number;
 }
 
+// SEC's policy_desc is a Thai-language category label from the API. Mirrors
+// ../Backtest Portfolio Webull:SEC OPENAI/frontend/src/components/PortfolioStep.tsx's
+// CATEGORY_LABELS_EN -- verified against the same underlying SEC fund universe.
+const CATEGORY_LABELS_EN: Record<string, string> = {
+  "ตราสารทุน": "Equity",
+  "ตราสารหนี้": "Fixed Income",
+  "ผสม": "Mixed",
+  "ทรัพย์สินทางเลือก": "Alternative Assets",
+  "อื่น ๆ": "Other",
+  "ไม่ระบุ เนื่องจากเป็นกองทุนรวมอีทีเอฟแบบ leveraged management หรือ inverse management": "Unspecified (Leveraged/Inverse ETF)"
+};
+
+function categoryLabel(value: string) {
+  return CATEGORY_LABELS_EN[value] ?? value;
+}
+
 function fundDisplayName(fund: FundSummary): string {
   return fund.proj_name_thai || fund.proj_id;
 }
 
-function buildFacets(funds: FundSummary[], field: "amc_name_thai") {
+function buildFacets(
+  funds: FundSummary[],
+  field: "amc_name_thai" | "policy_desc",
+  otherFilter: Set<string>,
+  otherField: "amc_name_thai" | "policy_desc"
+) {
   const counts = new Map<string, number>();
   for (const fund of funds) {
     const key = fund[field];
     if (!key) continue;
+    if (otherFilter.size && !otherFilter.has(fund[otherField] ?? "")) continue;
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   return Array.from(counts.entries())
@@ -50,23 +72,32 @@ function nextKey() {
 export function PortfolioStep({ funds, fundsLoading = false, active, onHoldingsChange, onContinue }: Props) {
   const [rows, setRows] = useState<Row[]>([{ key: nextKey(), projId: "", weight: 0, query: "" }]);
   const [amcFilter, setAmcFilter] = useState<Set<string>>(new Set());
+  const [categoryFilter, setCategoryFilter] = useState<Set<string>>(new Set());
   const seededRef = useRef(false);
 
   const fundsById = useMemo(() => new Map(funds.map((fund) => [fund.proj_id, fund])), [funds]);
 
-  const amcFacets = useMemo(() => buildFacets(funds, "amc_name_thai"), [funds]);
+  const amcFacets = useMemo(
+    () => buildFacets(funds, "amc_name_thai", categoryFilter, "policy_desc"),
+    [funds, categoryFilter]
+  );
+  const categoryFacets = useMemo(
+    () => buildFacets(funds, "policy_desc", amcFilter, "amc_name_thai"),
+    [funds, amcFilter]
+  );
 
   const filteredFunds = useMemo(
     () =>
       funds.filter((fund) => {
         if (amcFilter.size && (!fund.amc_name_thai || !amcFilter.has(fund.amc_name_thai))) return false;
+        if (categoryFilter.size && (!fund.policy_desc || !categoryFilter.has(fund.policy_desc))) return false;
         return true;
       }),
-    [funds, amcFilter]
+    [funds, amcFilter, categoryFilter]
   );
 
-  function toggleAmcFilter(value: string) {
-    setAmcFilter((current) => {
+  function toggleFilter(setter: (updater: (current: Set<string>) => Set<string>) => void, value: string) {
+    setter((current) => {
       const next = new Set(current);
       if (next.has(value)) next.delete(value);
       else next.add(value);
@@ -76,6 +107,7 @@ export function PortfolioStep({ funds, fundsLoading = false, active, onHoldingsC
 
   function clearAllFilters() {
     setAmcFilter(new Set());
+    setCategoryFilter(new Set());
   }
 
   useEffect(() => {
@@ -215,7 +247,10 @@ export function PortfolioStep({ funds, fundsLoading = false, active, onHoldingsC
                 canRemove={rows.length > 1}
                 amcFacets={amcFacets}
                 amcFilter={amcFilter}
-                onToggleAmc={toggleAmcFilter}
+                categoryFacets={categoryFacets}
+                categoryFilter={categoryFilter}
+                onToggleAmc={(value) => toggleFilter(setAmcFilter, value)}
+                onToggleCategory={(value) => toggleFilter(setCategoryFilter, value)}
                 onClearFilters={clearAllFilters}
                 onSelect={(fund) => selectFund(row.key, fund)}
                 onQueryChange={(query) => setQuery(row.key, query)}
@@ -262,7 +297,10 @@ function HoldingsRow({
   canRemove,
   amcFacets,
   amcFilter,
+  categoryFacets,
+  categoryFilter,
   onToggleAmc,
+  onToggleCategory,
   onClearFilters,
   onSelect,
   onQueryChange,
@@ -276,7 +314,10 @@ function HoldingsRow({
   canRemove: boolean;
   amcFacets: Facet[];
   amcFilter: Set<string>;
+  categoryFacets: Facet[];
+  categoryFilter: Set<string>;
   onToggleAmc: (value: string) => void;
+  onToggleCategory: (value: string) => void;
   onClearFilters: () => void;
   onSelect: (fund: FundSummary) => void;
   onQueryChange: (query: string) => void;
@@ -286,7 +327,7 @@ function HoldingsRow({
   const [open, setOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
-  const activeFilterCount = amcFilter.size;
+  const activeFilterCount = amcFilter.size + categoryFilter.size;
   const inputRef = useRef<HTMLInputElement | null>(null);
   const fieldRef = useRef<HTMLDivElement | null>(null);
   const fund = allFunds.find((item) => item.proj_id === row.projId);
@@ -356,7 +397,7 @@ function HoldingsRow({
           autoComplete="off"
         />
         <div className={open ? "fund-suggest open" : "fund-suggest"}>
-          {amcFacets.length ? (
+          {amcFacets.length || categoryFacets.length ? (
             <div className="fund-suggest-filters">
               <button
                 className="fund-suggest-filter-toggle"
@@ -375,7 +416,12 @@ function HoldingsRow({
                       Clear all filters
                     </button>
                   ) : null}
-                  <FacetGroup label="AMC" facets={amcFacets} selected={amcFilter} onToggle={onToggleAmc} />
+                  {amcFacets.length ? (
+                    <FacetGroup label="AMC" facets={amcFacets} selected={amcFilter} onToggle={onToggleAmc} />
+                  ) : null}
+                  {categoryFacets.length ? (
+                    <FacetGroup facets={categoryFacets} formatLabel={categoryLabel} label="Fund category" onToggle={onToggleCategory} selected={categoryFilter} />
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -418,16 +464,18 @@ function FacetGroup({
   label,
   facets,
   selected,
-  onToggle
+  onToggle,
+  formatLabel = (value: string) => value
 }: {
   label: string;
   facets: Facet[];
   selected: Set<string>;
   onToggle: (value: string) => void;
+  formatLabel?: (value: string) => string;
 }) {
   const [query, setQuery] = useState("");
   const visible = query.trim()
-    ? facets.filter((facet) => facet.value.toLowerCase().includes(query.trim().toLowerCase()))
+    ? facets.filter((facet) => formatLabel(facet.value).toLowerCase().includes(query.trim().toLowerCase()))
     : facets;
   const showSearch = facets.length > 6;
 
@@ -457,7 +505,7 @@ function FacetGroup({
               onMouseDown={(event) => event.stopPropagation()}
               type="checkbox"
             />
-            <span className="filter-check-label">{facet.value}</span>
+            <span className="filter-check-label">{formatLabel(facet.value)}</span>
             <span className="filter-check-count">{facet.count}</span>
           </label>
         ))}
