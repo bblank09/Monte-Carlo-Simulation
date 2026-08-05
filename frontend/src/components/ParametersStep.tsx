@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Info } from "lucide-react";
+import { Info, X } from "lucide-react";
 import type { SimulateRequest, NamedGoal, FundSummary, Holding } from "../types/simulate";
 
 const SIMULATION_MODEL_HELP = "Controls how randomness is generated: Historical replays real past returns, Forecasted and Statistical simulate returns from a time-series model, and Parameterized draws from a distribution you define directly.";
@@ -561,6 +561,15 @@ function GoalsTable({ goals, onChange }: { goals: NamedGoal[]; onChange: (goals:
   }
   return (
     <div className="goals-table">
+      <div className="goals-head">
+        <div>Purpose</div>
+        <div>Type</div>
+        <div>Amount</div>
+        <div>Starts</div>
+        <div>Ends</div>
+        <div>Frequency</div>
+        <div />
+      </div>
       {goals.map((goal, index) => (
         <div className="goal-row" key={index}>
           <input
@@ -595,10 +604,12 @@ function GoalsTable({ goals, onChange }: { goals: NamedGoal[]; onChange: (goals:
             <option value="quarterly">Quarterly</option>
             <option value="annually">Annually</option>
           </select>
-          <button className="btn btn-ghost" type="button" onClick={() => removeGoal(index)}>Remove</button>
+          <button aria-label="Remove goal" className="icon-btn" type="button" onClick={() => removeGoal(index)}>
+            <X size={15} />
+          </button>
         </div>
       ))}
-      <button type="button" className="link-btn" onClick={addGoal}>+ Add goal</button>
+      <button type="button" className="add-asset" onClick={addGoal}>+ Add goal</button>
     </div>
   );
 }
