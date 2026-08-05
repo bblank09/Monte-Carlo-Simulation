@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Info } from "lucide-react";
 import type { SimulateRequest, NamedGoal, FundSummary, Holding } from "../types/simulate";
 
@@ -50,6 +50,36 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
   } else if (value.n_paths < 1000) {
     fieldErrors.n_paths = "Fewer than 1,000 paths gives statistically unreliable percentile estimates.";
   }
+  if (!multiGoal && value.cashflow_mode !== "none" && !((value.cashflow_amount ?? 0) > 0)) {
+    fieldErrors.cashflow_amount = "Cashflow amount must be greater than 0.";
+  }
+  if (multiGoal) {
+    if (!(value.years_to_retirement && value.years_to_retirement >= 1)) {
+      fieldErrors.years_to_retirement = "Years to retirement must be at least 1.";
+    }
+    if (!(value.glide_path_years && value.glide_path_years >= 1)) {
+      fieldErrors.glide_path_years = "Glide path years must be at least 1.";
+    }
+    const retirementTotal = (value.retirement_holdings ?? []).reduce((sum, h) => sum + (h.weight || 0), 0);
+    if (!(value.retirement_holdings && value.retirement_holdings.length) || Math.abs(retirementTotal - 100) > 0.05) {
+      fieldErrors.retirement_holdings = `Retirement allocation weights must sum to 100% (currently ${retirementTotal.toFixed(1)}%).`;
+    }
+  }
+  if (value.simulation_model === "parameterized") {
+    if (value.expected_return === undefined || value.expected_return === null) {
+      fieldErrors.expected_return = "Expected return is required.";
+    }
+    if (!((value.expected_volatility ?? 0) > 0)) {
+      fieldErrors.expected_volatility = "Expected volatility must be greater than 0.";
+    }
+    if (value.distribution === "fat_tailed" && !((value.degrees_of_freedom ?? 0) > 2)) {
+      fieldErrors.degrees_of_freedom = "Degrees of freedom must be greater than 2 for a fat-tailed distribution.";
+    }
+  }
+
+  useEffect(() => {
+    if (multiGoal && (value.retirement_holdings ?? []).length > 0) markTouched("retirement_holdings");
+  }, [multiGoal, value.retirement_holdings]);
 
   function fieldError(field: string): string | null {
     return touched[field] ? (fieldErrors[field] ?? null) : null;
@@ -205,7 +235,9 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
                     type="number"
                     value={value.degrees_of_freedom ?? 5}
                     onChange={(e) => patch({ degrees_of_freedom: Number(e.target.value) })}
+                    onBlur={() => markTouched("degrees_of_freedom")}
                   />
+                  {fieldError("degrees_of_freedom") && <div className="field-error">{fieldError("degrees_of_freedom")}</div>}
                 </div>
               )}
               <div className="form-field">
@@ -217,7 +249,9 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
                   type="number"
                   value={value.expected_return ?? 0}
                   onChange={(e) => patch({ expected_return: Number(e.target.value) })}
+                  onBlur={() => markTouched("expected_return")}
                 />
+                {fieldError("expected_return") && <div className="field-error">{fieldError("expected_return")}</div>}
               </div>
               <div className="form-field">
                 <label htmlFor="expected_volatility">Expected Volatility</label>
@@ -228,7 +262,9 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
                   type="number"
                   value={value.expected_volatility ?? 0}
                   onChange={(e) => patch({ expected_volatility: Number(e.target.value) })}
+                  onBlur={() => markTouched("expected_volatility")}
                 />
+                {fieldError("expected_volatility") && <div className="field-error">{fieldError("expected_volatility")}</div>}
               </div>
             </div>
           </>
@@ -281,7 +317,9 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
                     type="number"
                     value={value.cashflow_amount ?? 0}
                     onChange={(e) => patch({ cashflow_amount: Number(e.target.value) })}
+                    onBlur={() => markTouched("cashflow_amount")}
                   />
+                  {fieldError("cashflow_amount") && <div className="field-error">{fieldError("cashflow_amount")}</div>}
                 </div>
                 <div className="form-field">
                   <label htmlFor="cashflow_inflation_adjusted">Inflation Adjusted</label>
@@ -329,7 +367,9 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
                   type="number"
                   value={value.years_to_retirement ?? 20}
                   onChange={(e) => patch({ years_to_retirement: Number(e.target.value) })}
+                  onBlur={() => markTouched("years_to_retirement")}
                 />
+                {fieldError("years_to_retirement") && <div className="field-error">{fieldError("years_to_retirement")}</div>}
               </div>
               <div className="form-field">
                 <label htmlFor="glide_path_years">Glide Path Years</label>
@@ -340,7 +380,9 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
                   type="number"
                   value={value.glide_path_years ?? 10}
                   onChange={(e) => patch({ glide_path_years: Number(e.target.value) })}
+                  onBlur={() => markTouched("glide_path_years")}
                 />
+                {fieldError("glide_path_years") && <div className="field-error">{fieldError("glide_path_years")}</div>}
               </div>
             </div>
             <div className="section-title" style={{ marginTop: 20 }}>Retirement Portfolio Allocation</div>
@@ -349,6 +391,7 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
               retirementHoldings={value.retirement_holdings ?? []}
               onChange={(retirement_holdings) => patch({ retirement_holdings })}
             />
+            {fieldError("retirement_holdings") && <div className="field-error">{fieldError("retirement_holdings")}</div>}
           </>
         )}
 
@@ -536,9 +579,17 @@ function GoalsTable({ goals, onChange }: { goals: NamedGoal[]; onChange: (goals:
             <option value="contribute">Contribute</option>
             <option value="withdraw">Withdraw</option>
           </select>
-          <input className="field" type="number" placeholder="Amount" value={goal.amount} onChange={(e) => updateGoal(index, { amount: Number(e.target.value) })} />
-          <input className="field" type="number" placeholder="Starts (year)" value={goal.starts_year} onChange={(e) => updateGoal(index, { starts_year: Number(e.target.value) })} />
-          <input className="field" type="number" placeholder="Ends (year)" value={goal.ends_year} onChange={(e) => updateGoal(index, { ends_year: Number(e.target.value) })} />
+          <div className="form-field">
+            <input className="field" type="number" placeholder="Amount" value={goal.amount} onChange={(e) => updateGoal(index, { amount: Number(e.target.value) })} />
+            {!(goal.amount > 0) && <div className="field-error">Amount must be greater than 0.</div>}
+          </div>
+          <div className="form-field">
+            <input className="field" type="number" placeholder="Starts (year)" value={goal.starts_year} onChange={(e) => updateGoal(index, { starts_year: Number(e.target.value) })} />
+          </div>
+          <div className="form-field">
+            <input className="field" type="number" placeholder="Ends (year)" value={goal.ends_year} onChange={(e) => updateGoal(index, { ends_year: Number(e.target.value) })} />
+            {goal.ends_year <= goal.starts_year && <div className="field-error">End year must be after start year.</div>}
+          </div>
           <select className="field" value={goal.frequency} onChange={(e) => updateGoal(index, { frequency: e.target.value as NamedGoal["frequency"] })}>
             <option value="monthly">Monthly</option>
             <option value="quarterly">Quarterly</option>
