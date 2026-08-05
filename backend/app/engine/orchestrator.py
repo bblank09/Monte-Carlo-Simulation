@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 from backend.app.data.returns import estimate_mu_sigma
-from backend.app.engine.gbm import simulate_gbm_paths  # noqa: F401 (used indirectly via statistical)
 from backend.app.engine.historical import simulate_historical
 from backend.app.engine.forecasted import simulate_forecasted
 from backend.app.engine.statistical import simulate_statistical
@@ -66,10 +65,13 @@ def run_simulation(request: SimulateRequest, returns_df: pd.DataFrame) -> Simula
     elif request.cashflow_mode != "none":
         # rolling_average_spending / geometric_spending / withdraw_life_expectancy are
         # not yet distinctly implemented (see Task 11's "Known follow-up" note) -- they
-        # fall through to the same fixed-amount treatment as withdraw_fixed for now.
+        # fall through to the same fixed-DOLLAR-amount treatment as withdraw_fixed for
+        # now. withdraw_percent IS distinctly implemented (percent-of-current-balance,
+        # not a fixed dollar figure) via apply_cashflow's is_percent branch.
         cashflow = {
             "amount": request.cashflow_amount or 0.0,
             "is_withdrawal": request.cashflow_mode != "contribute",
+            "is_percent": request.cashflow_mode == "withdraw_percent",
             "inflation_adjusted": bool(request.cashflow_inflation_adjusted),
             "frequency": request.cashflow_frequency or "annually",
         }

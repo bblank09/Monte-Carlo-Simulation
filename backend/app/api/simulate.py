@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from backend.app.domain.schemas import SimulateRequest, SimulateResponse
 from backend.app.engine.orchestrator import run_simulation
 from backend.app.data.sec_client import get_daily_nav
-from backend.app.data.returns import build_price_panel, log_returns
+from backend.app.data.returns import NavGapError, build_price_panel, log_returns
 
 router = APIRouter()
 
@@ -18,7 +18,10 @@ def load_nav_returns(proj_ids: list[str], simulation_period_years: int):
             raise HTTPException(status_code=503, detail=f"NAV_CACHE_MISSING: no NAV history for {proj_id}")
         frames.append(nav_df)
     nav_df = pd.concat(frames, ignore_index=True)
-    panel = build_price_panel(nav_df)
+    try:
+        panel = build_price_panel(nav_df)
+    except NavGapError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return log_returns(panel)
 
 

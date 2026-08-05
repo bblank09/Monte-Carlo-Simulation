@@ -2,21 +2,37 @@ import numpy as np
 
 
 def apply_cashflow(paths: np.ndarray, initial_amount: float, cashflow: dict) -> np.ndarray:
-    """Apply one fixed annual contribution/withdrawal to normalized growth-factor paths,
-    year by year, compounding on the resulting dollar balance each year. `cashflow["amount"]`
-    is a per-occurrence figure, scaled to an annual net cashflow by `cashflow["frequency"]`
-    via `_annualized_goal_amount` -- the same frequency-scaling `apply_named_goals` already
-    applies, so a "monthly" cashflow actually withdraws/contributes 12x its entered amount
-    per year, not 1x."""
+    """Apply one annual contribution/withdrawal to normalized growth-factor paths, year
+    by year, compounding on the resulting dollar balance each year.
+
+    `cashflow["is_percent"]` selects between two amount interpretations:
+    - False (default): `cashflow["amount"]` is a per-occurrence DOLLAR figure, scaled to
+      an annual net cashflow by `cashflow["frequency"]` via `_annualized_goal_amount` --
+      a "monthly" cashflow actually withdraws/contributes 12x its entered amount per
+      year, not 1x.
+    - True: `cashflow["amount"]` is a per-occurrence PERCENT-OF-CURRENT-BALANCE figure
+      (e.g. 1 means 1%). It is still scaled by `cashflow["frequency"]` the same way, then
+      applied against that year's grown balance -- so a path with a larger balance
+      withdraws more dollars than a path with a smaller one, unlike the fixed-dollar
+      case. This mirrors "withdraw_percent" in the Cashflow selector
+      (backend/app/domain/schemas.py's `cashflow_mode`), which used to silently fall
+      through to fixed-dollar treatment (a bug: a user picking e.g. "4%" got a $4/year
+      withdrawal instead of 4% of their balance) until this was implemented.
+    """
     n_paths, n_years_plus_one = paths.shape
     n_years = n_years_plus_one - 1
     growth_factors = paths[:, 1:] / paths[:, :-1]
     sign = -1.0 if cashflow["is_withdrawal"] else 1.0
-    amount = _annualized_goal_amount(cashflow)
+    is_percent = cashflow.get("is_percent", False)
+    annual_rate_or_amount = _annualized_goal_amount(cashflow)
     values = np.empty((n_paths, n_years_plus_one))
     values[:, 0] = initial_amount
     for year in range(n_years):
         grown = values[:, year] * growth_factors[:, year]
+        if is_percent:
+            amount = grown * (annual_rate_or_amount / 100.0)
+        else:
+            amount = annual_rate_or_amount
         values[:, year + 1] = np.maximum(grown + sign * amount, 0.0)
     return values
 

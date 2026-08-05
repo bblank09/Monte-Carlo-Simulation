@@ -43,11 +43,12 @@ class SimulateRequest(BaseModel):
     expected_volatility: Optional[float] = None
 
     # Cashflow (single, default mode) -- 7 modes to match the frontend's Cashflow
-    # dropdown (Task 17's ParametersStep). The 3 added beyond the original 4
-    # (rolling_average_spending, geometric_spending, withdraw_life_expectancy) do not
-    # yet have engine support in engine/goals.py -- Task 8b's orchestrator wiring below
-    # treats them as withdraw_fixed for now and this is flagged as a known follow-up,
-    # not silently dropped.
+    # dropdown (Task 17's ParametersStep). withdraw_fixed and withdraw_percent both have
+    # dedicated engine support in engine/goals.py's apply_cashflow (fixed-dollar vs.
+    # percent-of-current-balance). The remaining 3 (rolling_average_spending,
+    # geometric_spending, withdraw_life_expectancy) do not yet have engine support --
+    # the orchestrator's wiring treats them as withdraw_fixed for now and this is
+    # flagged as a known follow-up, not silently dropped.
     cashflow_mode: Literal["none", "contribute", "withdraw_fixed", "withdraw_percent", "rolling_average_spending", "geometric_spending", "withdraw_life_expectancy"] = "none"
     cashflow_amount: Optional[float] = None
     cashflow_inflation_adjusted: Optional[bool] = None
@@ -77,6 +78,30 @@ class SimulateRequest(BaseModel):
         if self.simulation_model == "parameterized":
             if self.expected_return is None or self.expected_volatility is None or self.distribution is None:
                 raise ValueError("parameterized model requires expected_return, expected_volatility, distribution")
+        return self
+
+    @model_validator(mode="after")
+    def sequence_of_returns_risk_incompatible_with_glide_path(self):
+        # Multistage/glide-path composition (engine/glide_path_orchestration.py) runs
+        # each model one simulated year at a time (simulation_period_years=1 per call).
+        # historical.py's sequence-of-returns-risk stress test works by reordering the
+        # worst N years to the front of a multi-year draw -- reordering within a
+        # length-1 array is a no-op, so under glide-path composition the stress test
+        # would silently do nothing instead of applying (previously an undisclosed gap;
+        # rejecting the combination outright is safer than a simulation that looks like
+        # it applied the stress test but didn't).
+        is_multistage = bool(
+            self.multi_goal_enabled and self.years_to_retirement is not None
+            and self.glide_path_years is not None and self.retirement_holdings
+        )
+        if is_multistage and (self.sequence_of_returns_risk or 0) > 0:
+            raise ValueError(
+                "sequence_of_returns_risk is not supported together with glide-path "
+                "multistage composition (years_to_retirement + glide_path_years + "
+                "retirement_holdings) -- the stress test's year-reordering has no effect "
+                "under the per-year composition, so this combination is rejected rather "
+                "than silently ignored."
+            )
         return self
 
 

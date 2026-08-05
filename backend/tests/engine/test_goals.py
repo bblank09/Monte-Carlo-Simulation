@@ -34,6 +34,50 @@ def test_apply_cashflow_scales_amount_by_frequency():
     assert monthly[0, -1] > annual[0, -1]
 
 
+def test_apply_cashflow_percent_withdrawal_scales_with_balance():
+    # A fixed-dollar withdrawal takes the same amount regardless of balance; a
+    # percent-of-balance withdrawal (is_percent=True) must take MORE dollars from a
+    # path with a bigger balance -- this is what distinguishes "withdraw_percent" from
+    # a bug where it silently behaved like withdraw_fixed.
+    paths = np.ones((2, 3))
+    values = apply_cashflow(paths, initial_amount=1.0, cashflow={
+        "amount": 4.0, "is_withdrawal": True, "is_percent": True,
+        "inflation_adjusted": False, "frequency": "annually",
+    })
+    # Two independent starting balances via a second call, since apply_cashflow takes a
+    # single initial_amount for all paths in the batch.
+    small = apply_cashflow(np.ones((1, 3)), initial_amount=1_000.0, cashflow={
+        "amount": 4.0, "is_withdrawal": True, "is_percent": True,
+        "inflation_adjusted": False, "frequency": "annually",
+    })
+    big = apply_cashflow(np.ones((1, 3)), initial_amount=100_000.0, cashflow={
+        "amount": 4.0, "is_withdrawal": True, "is_percent": True,
+        "inflation_adjusted": False, "frequency": "annually",
+    })
+    small_withdrawn = small[0, 0] - small[0, 1]
+    big_withdrawn = big[0, 0] - big[0, 1]
+    assert np.isclose(small_withdrawn, 40.0)  # 4% of 1,000
+    assert np.isclose(big_withdrawn, 4_000.0)  # 4% of 100,000
+    assert big_withdrawn > small_withdrawn
+    assert values[0, 1] < values[0, 0]  # sanity: still a real withdrawal, not a no-op
+
+
+def test_apply_cashflow_percent_withdrawal_scales_by_frequency():
+    paths = np.ones((2, 3))
+    monthly = apply_cashflow(paths, initial_amount=1_000.0, cashflow={
+        "amount": 1.0, "is_withdrawal": True, "is_percent": True,
+        "inflation_adjusted": False, "frequency": "monthly",
+    })
+    annual = apply_cashflow(paths, initial_amount=1_000.0, cashflow={
+        "amount": 1.0, "is_withdrawal": True, "is_percent": True,
+        "inflation_adjusted": False, "frequency": "annually",
+    })
+    # "1% monthly" is 12% of balance per year, 12x "1% annually" -- same
+    # frequency-scaling contract as the fixed-dollar case.
+    assert np.isclose(1_000.0 - monthly[0, 1], 120.0)
+    assert np.isclose(1_000.0 - annual[0, 1], 10.0)
+
+
 def test_apply_named_goals_reports_success_rate():
     paths = np.ones((10, 4))
     goals = [
