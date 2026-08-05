@@ -16,6 +16,7 @@ def list_funds():
             "proj_id": item.get("proj_id"),
             "proj_name_thai": item.get("proj_name_th"),
             "amc_name_thai": item.get("comp_name_th"),
+            "policy_desc": item.get("policy_desc"),
         }
         for item in find_equity_funds()
     ]

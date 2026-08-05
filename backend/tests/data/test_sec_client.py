@@ -62,3 +62,4 @@ def test_find_equity_funds_filters_policy_and_main_class(fake_fund_universe):
     assert [f["proj_id"] for f in funds] == ["A"]
     assert funds[0]["proj_name_th"] == "Fund A"
     assert funds[0]["comp_name_th"] == "AMC A"
+    assert funds[0]["policy_desc"] == "ตราสารทุน"

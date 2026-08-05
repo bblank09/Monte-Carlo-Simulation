@@ -65,4 +65,5 @@ export interface FundSummary {
   proj_id: string;
   proj_name_thai?: string;
   amc_name_thai?: string;
+  policy_desc?: string;
 }

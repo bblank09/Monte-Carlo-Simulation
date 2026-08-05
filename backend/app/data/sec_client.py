@@ -64,6 +64,7 @@ def find_equity_funds(policy_desc: str = "ตราสารทุน"):
             # project never had the full proj_name_th field cached either way.
             "proj_name_th": row["display_name"],
             "comp_name_th": row["amc_name_th"],
+            "policy_desc": row["policy_desc"],
         }
         for _, row in matched.iterrows()
     ]
