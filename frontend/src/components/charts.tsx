@@ -34,6 +34,16 @@ export interface TableSection {
   rows: (string | number)[][];
 }
 
+export interface ChartStat {
+  label: string;
+  value: string;
+}
+
+export interface CdfTargetPreset {
+  label: string;
+  value: number;
+}
+
 function slugify(label: string) {
   return label.replace(/[^a-zA-Z0-9]+/g, "-");
 }
@@ -50,7 +60,7 @@ function xForIndex(index: number, length: number) {
   return 70 + (index / Math.max(1, length - 1)) * 780;
 }
 
-function prepareSeries(series: ChartSeries[]) {
+function prepareSeries(series: ChartSeries[], yDomain?: [number, number]) {
   const maxLength = Math.max(1, ...series.map((item) => item.points.length));
   const step = Math.max(1, Math.floor(maxLength / 140));
   const sampledSeries = series.map((item) => ({
@@ -59,8 +69,10 @@ function prepareSeries(series: ChartSeries[]) {
   }));
   const pointCount = Math.max(1, ...sampledSeries.map((item) => item.points.length));
   const allValues = sampledSeries.flatMap((item) => item.points.map((point) => point.y));
-  const min = allValues.length ? Math.min(...allValues) : 0;
-  const max = allValues.length ? Math.max(...allValues) : 1;
+  const dataMin = allValues.length ? Math.min(...allValues) : 0;
+  const dataMax = allValues.length ? Math.max(...allValues) : 1;
+  const min = yDomain?.[0] ?? dataMin;
+  const max = yDomain?.[1] ?? dataMax;
   const range = max - min || 1;
   const yTicks = Array.from({ length: 6 }, (_, index) => {
     const value = min + (range * index) / 5;
@@ -109,8 +121,8 @@ function prepareSeries(series: ChartSeries[]) {
     seriesValues,
     pointCount,
     yFor,
-    min,
-    max,
+    min: dataMin,
+    max: dataMax,
     latestValue: lastPoint(series[0]?.points ?? [])?.y ?? 0,
     startX: series[0]?.points[0]?.x ?? 0,
     endX: lastPoint(series[0]?.points ?? [])?.x ?? 0
@@ -121,17 +133,30 @@ export function AxisCurve({
   title,
   series,
   valueFormat,
-  xFormat = (value: number) => String(value)
+  xFormat = (value: number) => String(value),
+  yDomain,
+  className,
+  badgeText,
+  stats,
 }: {
   title: string;
   series: ChartSeries[];
   valueFormat: (value: number) => string;
   xFormat?: (value: number) => string;
+  yDomain?: [number, number];
+  className?: string;
+  badgeText?: string;
+  stats?: ChartStat[];
 }) {
-  const prepared = useMemo(() => prepareSeries(series), [series]);
+  const prepared = useMemo(() => prepareSeries(series, yDomain), [series, yDomain]);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [hover, setHover] = useState<{ index: number; x: number; y: number } | null>(null);
   const gradientId = useId();
+  const resolvedStats = stats ?? [
+    { label: "Min", value: valueFormat(prepared.min) },
+    { label: "Max", value: valueFormat(prepared.max) },
+    { label: "Latest", value: valueFormat(prepared.latestValue) },
+  ];
 
   function handleMove(event: ReactMouseEvent<SVGRectElement>) {
     const rect = containerRef.current?.getBoundingClientRect();
@@ -154,13 +179,13 @@ export function AxisCurve({
   const hoverPlotX = hover ? xForIndex(hover.index, prepared.pointCount) : 0;
 
   return (
-    <section className="chartPanel">
+    <section className={className ? `chartPanel ${className}` : "chartPanel"}>
       <div className="panelHeader compact">
         <div>
           <h3>{title}</h3>
           <p>{xFormat(prepared.startX)} to {xFormat(prepared.endX)}</p>
         </div>
-        <span className="badge">{valueFormat(prepared.latestValue)}</span>
+        <span className="badge">{badgeText ?? valueFormat(prepared.latestValue)}</span>
       </div>
       <div className="chartLegend">
         {series.map((item) => (
@@ -243,9 +268,161 @@ export function AxisCurve({
         ) : null}
       </div>
       <div className="chartStats">
-        <span>Min: {valueFormat(prepared.min)}</span>
-        <span>Max: {valueFormat(prepared.max)}</span>
-        <span>Latest: {valueFormat(prepared.latestValue)}</span>
+        {resolvedStats.map((stat) => (
+          <span key={stat.label}><b>{stat.label}</b><strong>{stat.value}</strong></span>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function cdfEntries(values: number[]) {
+  const sorted = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  const entries: { value: number; probability: number }[] = [];
+  let index = 0;
+  while (index < sorted.length) {
+    const value = sorted[index];
+    let end = index + 1;
+    while (end < sorted.length && sorted[end] === value) end += 1;
+    entries.push({ value, probability: (end / sorted.length) * 100 });
+    index = end;
+  }
+  return entries;
+}
+
+export function TargetProbabilityChart({
+  title,
+  values,
+  target,
+  onTargetChange,
+  targetPresets = [],
+  xFormat,
+}: {
+  title: string;
+  values: number[];
+  target: number;
+  onTargetChange: (value: number) => void;
+  targetPresets?: CdfTargetPreset[];
+  xFormat: (value: number) => string;
+}) {
+  const inputId = useId();
+  const prepared = useMemo(() => {
+    const entries = cdfEntries(values);
+    if (!entries.length) return null;
+
+    const first = entries[0].value;
+    const last = entries[entries.length - 1].value;
+    const rawMin = Math.min(first, target);
+    const rawMax = Math.max(last, target);
+    const rawRange = rawMax - rawMin;
+    const padding = rawRange > 0 ? rawRange * 0.04 : Math.max(1, Math.abs(rawMax) * 0.04);
+    const min = rawMin >= 0 ? 0 : rawMin - padding;
+    const max = rawMax + padding;
+    const range = max - min || 1;
+    const xFor = (value: number) => 70 + ((value - min) / range) * 780;
+    const yFor = (probability: number) => 280 - (probability / 100) * 256;
+    const targetCount = values.filter((value) => Number.isFinite(value) && value <= target).length;
+    const targetProbability = (targetCount / values.filter((value) => Number.isFinite(value)).length) * 100;
+    const pathParts = [`M ${xFor(min).toFixed(1)} ${yFor(0).toFixed(1)}`, `L ${xFor(first).toFixed(1)} ${yFor(0).toFixed(1)}`];
+    let previousProbability = 0;
+    for (const entry of entries) {
+      const x = xFor(entry.value).toFixed(1);
+      pathParts.push(`L ${x} ${yFor(previousProbability).toFixed(1)}`, `L ${x} ${yFor(entry.probability).toFixed(1)}`);
+      previousProbability = entry.probability;
+    }
+    pathParts.push(`L ${xFor(max).toFixed(1)} ${yFor(previousProbability).toFixed(1)}`);
+
+    return {
+      min,
+      max,
+      xFor,
+      yFor,
+      path: pathParts.join(" "),
+      targetX: xFor(target),
+      targetY: yFor(targetProbability),
+      targetProbability,
+      xTicks: Array.from({ length: 5 }, (_, index) => {
+        const value = min + (range * index) / 4;
+        return { value, x: xFor(value) };
+      }),
+    };
+  }, [target, values]);
+
+  if (!prepared) return null;
+
+  const targetLabelOnLeft = prepared.targetX > 760;
+  const targetLabelX = targetLabelOnLeft ? prepared.targetX - 8 : prepared.targetX + 8;
+  return (
+    <section className="chartPanel cdfPanel">
+      <div className="panelHeader compact">
+        <div>
+          <h3>{title}</h3>
+          <p>Terminal balance threshold</p>
+        </div>
+        <span className="badge">Target · {xFormat(target)}</span>
+      </div>
+      <div className="cdfControls">
+        <div className="cdfTargetField">
+          <label htmlFor={inputId}>Target ending balance</label>
+          <input
+            id={inputId}
+            className="field num"
+            type="number"
+            min="0"
+            step="1000"
+            value={target}
+            onChange={(event) => onTargetChange(Math.max(0, Number(event.target.value) || 0))}
+          />
+        </div>
+        {targetPresets.length ? (
+          <div className="cdfPresets" aria-label="Target presets">
+            {targetPresets.map((preset) => (
+              <button key={preset.label} type="button" className="btn-chip" onClick={() => onTargetChange(preset.value)}>
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <div className="cdfProbability" aria-live="polite">
+          <strong>{prepared.targetProbability.toFixed(1)}%</strong>
+          <span>of paths end at or below target</span>
+        </div>
+      </div>
+      <p className="cdfExplanation">Read the vertical Target line to see the share of simulated portfolios that finish at or below the selected balance.</p>
+      <div className="cdfLegend">
+        <span><i className="cdfLineSwatch" />Ending balance CDF</span>
+        <span><i className="cdfTargetSwatch" />Selected target</span>
+      </div>
+      <div className="chartCanvas cdfCanvas">
+        <svg className="axisChart cdfChart" viewBox="0 0 880 320" role="img" aria-label={`${title}: ${prepared.targetProbability.toFixed(1)}% of paths end at or below ${xFormat(target)}`} preserveAspectRatio="none">
+          {[0, 20, 40, 60, 80, 100].map((value) => {
+            const y = prepared.yFor(value);
+            return (
+              <g key={value}>
+                <line className="gridLine" x1="70" x2="850" y1={y} y2={y} />
+                <text className="axisText" x="62" y={y + 4} textAnchor="end">{value}%</text>
+              </g>
+            );
+          })}
+          {prepared.xTicks.map((tick) => (
+            <g key={tick.x}>
+              <line className="gridLine vertical" x1={tick.x} x2={tick.x} y1="24" y2="280" />
+              <text className="axisText" x={tick.x} y="300" textAnchor="middle">{xFormat(tick.value)}</text>
+            </g>
+          ))}
+          <line className="axisLine" x1="70" x2="850" y1="280" y2="280" />
+          <line className="axisLine" x1="70" x2="70" y1="24" y2="280" />
+          <path className="cdfPath" d={prepared.path} />
+          <line className="cdfTargetLine" x1={prepared.targetX} x2={prepared.targetX} y1="24" y2="280" />
+          <line className="cdfTargetProbabilityLine" x1="70" x2={prepared.targetX} y1={prepared.targetY} y2={prepared.targetY} />
+          <text className="cdfTargetLabel" x={targetLabelX} y="18" textAnchor={targetLabelOnLeft ? "end" : "start"}>Target</text>
+          <text className="cdfTargetProbability" x={targetLabelX} y={Math.max(34, prepared.targetY - 8)} textAnchor={targetLabelOnLeft ? "end" : "start"}>{prepared.targetProbability.toFixed(1)}%</text>
+        </svg>
+      </div>
+      <div className="chartStats">
+        <span><b>Target</b><strong>{xFormat(target)}</strong></span>
+        <span><b>Below target</b><strong>{prepared.targetProbability.toFixed(1)}%</strong></span>
+        <span><b>Above target</b><strong>{(100 - prepared.targetProbability).toFixed(1)}%</strong></span>
       </div>
     </section>
   );
@@ -287,6 +464,131 @@ export function DataTable({ section, compact = false, caption }: { section: Tabl
   );
 }
 
+export interface HeatmapRow {
+  label: string;
+  values: (number | null)[];
+}
+
+export interface RangeMarker {
+  label: string;
+  value: number;
+  color: string;
+}
+
+export function PercentileRange({
+  title,
+  markers,
+  valueFormat,
+}: {
+  title: string;
+  markers: RangeMarker[];
+  valueFormat: (value: number) => string;
+}) {
+  const values = markers.map((marker) => marker.value).filter((value) => Number.isFinite(value));
+  const min = values.length ? Math.min(...values) : 0;
+  const max = values.length ? Math.max(...values) : 1;
+  const span = max - min || 1;
+  return (
+    <section className="chartPanel percentileRange">
+      <h3>{title}</h3>
+      <div className="rangeTrack" role="img" aria-label={`${title}: ${markers.map((marker) => `${marker.label} ${valueFormat(marker.value)}`).join(", ")}`}>
+        <span className="rangeRail" />
+        {markers.map((marker) => (
+          <span
+            className="rangeMarker"
+            key={marker.label}
+            style={{ left: `${((marker.value - min) / span) * 100}%`, color: marker.color }}
+          >
+            <i />
+            <strong>{marker.label}</strong>
+          </span>
+        ))}
+      </div>
+      <div className="rangeEndpoints">
+        <span>{valueFormat(min)}</span>
+        <span>{valueFormat(max)}</span>
+      </div>
+      <div className="rangeLegend">
+        {markers.map((marker) => <span key={marker.label}><i style={{ background: marker.color }} />{marker.label}: {valueFormat(marker.value)}</span>)}
+      </div>
+    </section>
+  );
+}
+
+function heatmapCellColor(value: number, min: number, max: number, diverging: boolean) {
+  const magnitude = diverging
+    ? Math.abs(value) / Math.max(Math.abs(min), Math.abs(max), 1e-9)
+    : (value - min) / Math.max(max - min, 1e-9);
+  const opacity = 0.12 + Math.min(1, Math.max(0, magnitude)) * 0.72;
+  if (diverging && value < 0) {
+    return { background: `rgb(180 35 24 / ${opacity})`, color: magnitude > 0.45 ? "#fff" : "var(--text-primary)" };
+  }
+  return { background: `rgb(19 122 79 / ${opacity})`, color: magnitude > 0.45 ? "#fff" : "var(--text-primary)" };
+}
+
+export function Heatmap({
+  title,
+  columns,
+  rows,
+  valueFormat,
+  description,
+  diverging = false,
+}: {
+  title: string;
+  columns: string[];
+  rows: HeatmapRow[];
+  valueFormat: (value: number) => string;
+  description?: string;
+  diverging?: boolean;
+}) {
+  const values = rows.flatMap((row) => row.values).filter((value): value is number => value != null && Number.isFinite(value));
+  const min = values.length ? Math.min(...values) : 0;
+  const max = values.length ? Math.max(...values) : 1;
+  return (
+    <section className="chartPanel">
+      <h3>{title}</h3>
+      {description ? <p className="summaryText">{description}</p> : null}
+      <div className="heatmapScroller">
+        <table className="resultHeatmap">
+          <caption className="srOnly">{title}</caption>
+          <thead>
+            <tr>
+              <th scope="col" />
+              {columns.map((column) => <th key={column} scope="col">{column}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.label}>
+                <th scope="row">{row.label}</th>
+                {columns.map((column, index) => {
+                  const value = row.values[index];
+                  const cellStyle = value == null ? undefined : heatmapCellColor(value, min, max, diverging);
+                  return (
+                    <td
+                      key={`${row.label}-${column}`}
+                      className={value == null ? "heatmapMissing" : "heatmapValue"}
+                      style={cellStyle}
+                      title={value == null ? "Not available for this horizon" : `${row.label}, ${column}: ${valueFormat(value)}`}
+                    >
+                      {value == null ? "N/A" : valueFormat(value)}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="heatmapLegend" aria-hidden="true">
+        <span><i className="heatmapSwatch heatmapSwatch-low" /> Lower</span>
+        <span><i className="heatmapSwatch heatmapSwatch-high" /> Higher</span>
+        {diverging ? <span><i className="heatmapSwatch heatmapSwatch-negative" /> Negative</span> : null}
+      </div>
+    </section>
+  );
+}
+
 export interface HistogramBin {
   bin: string;
   count: number;
@@ -296,17 +598,27 @@ export interface HistogramBin {
 
 const pct = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 2 });
 
-export function Histogram({ rows }: { rows: HistogramBin[] }) {
+export function Histogram({
+  rows,
+  valueFormat = (value) => pct.format(value),
+  showGainLossLegend = true,
+}: {
+  rows: HistogramBin[];
+  valueFormat?: (value: number) => string;
+  showGainLossLegend?: boolean;
+}) {
   const maxCount = Math.max(...rows.map((row) => row.count), 1);
   return (
     <div className="histWrap">
-      <div className="histLegend">
-        <span><i className="histSwatch histSwatch-loss" /> Loss</span>
-        <span><i className="histSwatch histSwatch-gain" /> Gain</span>
-      </div>
+      {showGainLossLegend ? (
+        <div className="histLegend">
+          <span><i className="histSwatch histSwatch-loss" /> Loss</span>
+          <span><i className="histSwatch histSwatch-gain" /> Gain</span>
+        </div>
+      ) : null}
       <div className="hist" role="img" aria-label={`Distribution histogram: ${rows.map((row) => `${row.bin}, ${row.count}`).join("; ")}`}>
-        {rows.map((row) => (
-          <div className="histCol" key={row.bin}>
+        {rows.map((row, index) => (
+          <div className="histCol" key={`${row.bin}-${index}`}>
             <span aria-hidden="true" className="histCount">{row.count || ""}</span>
             <div
               aria-hidden="true"
@@ -314,7 +626,7 @@ export function Histogram({ rows }: { rows: HistogramBin[] }) {
               style={{ height: `${Math.max(5, (row.count / maxCount) * 92)}px` }}
               title={`${row.bin}: ${row.count}`}
             />
-            <span aria-hidden="true" className="histAxisLabel">{pct.format(row.from)}</span>
+            <span aria-hidden="true" className="histAxisLabel">{valueFormat(row.from)}</span>
           </div>
         ))}
       </div>

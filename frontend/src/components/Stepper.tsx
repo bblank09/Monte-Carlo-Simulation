@@ -1,4 +1,4 @@
-const STEP_LABELS = ["Portfolio", "Parameters", "Results"];
+const STEP_LABELS = ["Portfolio", "Assumptions", "Results"];
 
 interface Props {
   currentStep: number;

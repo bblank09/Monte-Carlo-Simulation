@@ -114,6 +114,9 @@ class PercentileBand(BaseModel):
 
 
 class SimulateResponse(BaseModel):
+    run_id: str = ""
+    created_at: str = ""
+    data_source: Literal["sec_open_data"] = "sec_open_data"
     overview: dict
     growth: dict
     distribution: dict

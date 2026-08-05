@@ -21,11 +21,13 @@ export interface SimulateRequest {
   degrees_of_freedom?: number;
   expected_return?: number;
   expected_volatility?: number;
-  cashflow_mode: "none" | "contribute" | "withdraw_fixed" | "withdraw_percent" | "rolling_average_spending" | "geometric_spending" | "withdraw_life_expectancy";
+  /** Single-cashflow controls; multiple goals remain a backend-only compatibility shape. */
+  cashflow_mode?: "none" | "contribute" | "withdraw_fixed" | "withdraw_percent" | "rolling_average_spending" | "geometric_spending" | "withdraw_life_expectancy";
   cashflow_amount?: number;
   cashflow_inflation_adjusted?: boolean;
   cashflow_frequency?: "monthly" | "quarterly" | "annually";
-  multi_goal_enabled: boolean;
+  /** Legacy API compatibility; Parameters no longer exposes multiple goals. */
+  multi_goal_enabled?: boolean;
   goals?: NamedGoal[];
   years_to_retirement?: number;
   glide_path_years?: number;
@@ -46,6 +48,9 @@ export interface NamedGoal {
 }
 
 export interface SimulateResponse {
+  run_id: string;
+  created_at: string;
+  data_source: "sec_open_data";
   overview: Record<string, unknown>;
   growth: Record<string, unknown>;
   distribution: Record<string, unknown>;
@@ -55,15 +60,24 @@ export interface SimulateResponse {
   run_config: Record<string, unknown>;
 }
 
-// --- Deviations from the task-16 brief (documented in task-16-report.md) ---
-//
-// FundSummary: not specified in the brief, but frontend/src/api/client.ts
-// (Task 14/14b) already defines it inline as the getFunds() return shape.
-// Hoisted here so client.ts/mockData.ts/PortfolioStep.tsx share one
-// definition instead of three ad hoc copies.
+// The fund contract intentionally matches Backtest Portfolio's SecFund exactly.
+// Monte Carlo changes the simulation objective, not the SEC universe or picker.
 export interface FundSummary {
   proj_id: string;
-  proj_name_thai?: string;
-  amc_name_thai?: string;
-  policy_desc?: string;
+  unique_id: string;
+  fund_class_name: string;
+  class_abbr_name: string;
+  display_name: string;
+  search_term: string;
+  amc_name_th: string;
+  amc_name_en: string;
+  policy_desc: string;
+  nav_start: string | null;
+  nav_end: string | null;
+  nav_months: number | null;
+  nav_span_months: number | null;
+  nav_completeness: number | null;
+  nav_gap_count: number | null;
+  nav_largest_gap_start: string | null;
+  nav_largest_gap_end: string | null;
 }

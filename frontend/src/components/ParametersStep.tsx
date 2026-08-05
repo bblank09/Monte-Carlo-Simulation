@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import { Info, X } from "lucide-react";
-import type { SimulateRequest, NamedGoal, FundSummary, Holding } from "../types/simulate";
+import { useState } from "react";
+import { Info } from "lucide-react";
+import type { SimulateRequest } from "../types/simulate";
 
 const SIMULATION_MODEL_HELP = "Controls how randomness is generated: Historical replays real past returns, Forecasted and Statistical simulate returns from a time-series model, and Parameterized draws from a distribution you define directly.";
 const BOOTSTRAP_MODEL_HELP = "Determines how chunks of historical returns are resampled to build each simulated path (by single month, single year, or multi-year block).";
@@ -14,19 +14,16 @@ function InfoTip({ text }: { text: string }) {
     </span>
   );
 }
-
 interface Props {
   active: boolean;
   value: SimulateRequest;
   onChange: (value: SimulateRequest) => void;
   onBack: () => void;
   onContinue: () => void;
-  funds: FundSummary[];
   running?: boolean;
 }
 
-export function ParametersStep({ active, value, onChange, onBack, onContinue, funds, running = false }: Props) {
-  const [multiGoal, setMultiGoal] = useState(value.multi_goal_enabled);
+export function ParametersStep({ active, value, onChange, onBack, onContinue, running = false }: Props) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [touched, setTouched] = useState<Record<string, boolean>>({});
 
@@ -39,70 +36,59 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
   }
 
   const fieldErrors: Record<string, string> = {};
-  if (value.initial_amount <= 0) {
+  if (!Number.isFinite(value.initial_amount) || value.initial_amount <= 0) {
     fieldErrors.initial_amount = "Initial amount must be greater than 0.";
   }
-  if (value.simulation_period_years < 5 || value.simulation_period_years > 75) {
+  if (!Number.isInteger(value.simulation_period_years) || value.simulation_period_years < 5 || value.simulation_period_years > 75) {
     fieldErrors.simulation_period_years = "Simulation period must be between 5 and 75 years.";
   }
-  if (value.n_paths > 20000) {
+  if (!Number.isInteger(value.n_paths) || value.n_paths > 20000) {
     fieldErrors.n_paths = "Number of paths cannot exceed 20,000.";
   } else if (value.n_paths < 1000) {
     fieldErrors.n_paths = "Fewer than 1,000 paths gives statistically unreliable percentile estimates.";
   }
-  if (!multiGoal && value.cashflow_mode !== "none" && !((value.cashflow_amount ?? 0) > 0)) {
-    fieldErrors.cashflow_amount = "Cashflow amount must be greater than 0.";
-  }
-  if (multiGoal) {
-    if (!(value.years_to_retirement && value.years_to_retirement >= 1)) {
-      fieldErrors.years_to_retirement = "Years to retirement must be at least 1.";
-    }
-    if (!(value.glide_path_years && value.glide_path_years >= 1)) {
-      fieldErrors.glide_path_years = "Glide path years must be at least 1.";
-    }
-    const retirementTotal = (value.retirement_holdings ?? []).reduce((sum, h) => sum + (h.weight || 0), 0);
-    if (!(value.retirement_holdings && value.retirement_holdings.length) || Math.abs(retirementTotal - 100) > 0.05) {
-      fieldErrors.retirement_holdings = `Retirement allocation weights must sum to 100% (currently ${retirementTotal.toFixed(1)}%).`;
-    }
+  if ((value.simulation_model === "forecasted" || value.simulation_model === "statistical") && !value.time_series_model) {
+    fieldErrors.time_series_model = "Choose a time-series model.";
   }
   if (value.simulation_model === "parameterized") {
-    if (value.expected_return === undefined || value.expected_return === null) {
+    if (value.expected_return === undefined || value.expected_return === null || !Number.isFinite(value.expected_return)) {
       fieldErrors.expected_return = "Expected return is required.";
     }
-    if (!((value.expected_volatility ?? 0) > 0)) {
+    if (!Number.isFinite(value.expected_volatility) || !((value.expected_volatility ?? 0) > 0)) {
       fieldErrors.expected_volatility = "Expected volatility must be greater than 0.";
     }
-    if (value.distribution === "fat_tailed" && !((value.degrees_of_freedom ?? 0) > 2)) {
+    if (!value.distribution) {
+      fieldErrors.distribution = "Choose a return distribution.";
+    }
+    if (value.distribution === "fat_tailed" && (
+      !Number.isFinite(value.degrees_of_freedom) || !((value.degrees_of_freedom ?? 0) > 2)
+    )) {
       fieldErrors.degrees_of_freedom = "Degrees of freedom must be greater than 2 for a fat-tailed distribution.";
     }
   }
-
-  useEffect(() => {
-    if (multiGoal && (value.retirement_holdings ?? []).length > 0) markTouched("retirement_holdings");
-  }, [multiGoal, value.retirement_holdings]);
-
+  if (value.cashflow_mode && value.cashflow_mode !== "none" && (
+    !Number.isFinite(value.cashflow_amount) || !((value.cashflow_amount ?? 0) > 0)
+  )) {
+    fieldErrors.cashflow_amount = "Cashflow amount must be greater than 0.";
+  }
+  if (value.inflation_model === "parameterized") {
+    if (!Number.isFinite(value.inflation_mean)) fieldErrors.inflation_mean = "Inflation mean must be a number.";
+    if (!Number.isFinite(value.inflation_volatility) || !((value.inflation_volatility ?? 0) > 0)) {
+      fieldErrors.inflation_volatility = "Inflation volatility must be greater than 0.";
+    }
+  }
+  if (value.simulation_model === "historical" && value.bootstrap_model === "block_of_years" && (!Number.isInteger(value.block_years) || (value.block_years ?? 0) < 1)) {
+    fieldErrors.block_years = "Block size must be at least 1 year.";
+  }
   function fieldError(field: string): string | null {
     return touched[field] ? (fieldErrors[field] ?? null) : null;
   }
-
-  function toggleMultiGoal(enabled: boolean) {
-    setMultiGoal(enabled);
-    patch({
-      multi_goal_enabled: enabled,
-      goals: enabled ? (value.goals ?? []) : undefined,
-      years_to_retirement: enabled ? (value.years_to_retirement ?? 20) : undefined,
-      glide_path_years: enabled ? (value.glide_path_years ?? 10) : undefined,
-    });
-  }
-
-  const goalsSummary = multiGoal && value.goals && value.goals.length > 0
-    ? `${value.goals.length} goal${value.goals.length !== 1 ? "s" : ""}`
-    : "single cashflow mode";
+  const canContinue = !running && Object.keys(fieldErrors).length === 0;
 
   return (
     <div className={active ? "page active" : "page"}>
       <div className="page-head">
-        <h1>Set your simulation parameters</h1>
+        <h1>Set your simulation assumptions</h1>
         <p>Choose a simulation model and configure the assumptions behind it.</p>
       </div>
 
@@ -169,7 +155,7 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
         {/* ===== Historical Model Settings ===== */}
         {value.simulation_model === "historical" && (
           <>
-            <div className="section-title" style={{ marginTop: 20 }}>Historical Model Settings</div>
+            <div className="section-title section-title-spaced">Historical Model Settings</div>
             <div className="form-grid">
               <div className="form-field">
                 <label htmlFor="use_full_history">Use Full History</label>
@@ -190,7 +176,7 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
         {/* ===== Time Series Model ===== */}
         {(value.simulation_model === "forecasted" || value.simulation_model === "statistical") && (
           <>
-            <div className="section-title" style={{ marginTop: 20 }}>Time Series Model</div>
+            <div className="section-title section-title-spaced">Time Series Model</div>
             <div className="form-grid">
               <div className="form-field">
                 <label htmlFor="time_series_model" className="label-with-info">Model Type <InfoTip text={TIME_SERIES_MODEL_HELP} /></label>
@@ -203,6 +189,7 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
                   <option value="normal">Normal</option>
                   <option value="garch">GARCH</option>
                 </select>
+                {fieldError("time_series_model") && <div className="field-error">{fieldError("time_series_model")}</div>}
               </div>
             </div>
           </>
@@ -211,7 +198,7 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
         {/* ===== Parameterized Distribution ===== */}
         {value.simulation_model === "parameterized" && (
           <>
-            <div className="section-title" style={{ marginTop: 20 }}>Parameterized Distribution</div>
+            <div className="section-title section-title-spaced">Parameterized Distribution</div>
             <div className="form-grid">
               <div className="form-field">
                 <label htmlFor="distribution">Distribution</label>
@@ -219,11 +206,15 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
                   className="field"
                   id="distribution"
                   value={value.distribution ?? "normal"}
-                  onChange={(e) => patch({ distribution: e.target.value as SimulateRequest["distribution"] })}
+                  onChange={(e) => patch({
+                    distribution: e.target.value as SimulateRequest["distribution"],
+                    degrees_of_freedom: e.target.value === "fat_tailed" ? (value.degrees_of_freedom ?? 5) : value.degrees_of_freedom,
+                  })}
                 >
                   <option value="normal">Normal</option>
                   <option value="fat_tailed">Fat-tailed (Student-t)</option>
                 </select>
+                {fieldError("distribution") && <div className="field-error">{fieldError("distribution")}</div>}
               </div>
               {value.distribution === "fat_tailed" && (
                 <div className="form-field">
@@ -270,133 +261,72 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
           </>
         )}
 
-        {/* ===== Cashflow & Goals ===== */}
-        <div className="section-title" style={{ marginTop: 20 }}>Cashflow &amp; Goals</div>
+        {/* ===== Single Cashflow ===== */}
+        <div className="section-title section-title-spaced">Cashflow</div>
         <div className="form-grid">
           <div className="form-field">
-            <label htmlFor="multi_goal">Cashflow mode</label>
+            <label htmlFor="cashflow_mode">Cashflow mode</label>
             <select
               className="field"
-              id="multi_goal"
-              value={multiGoal ? "yes" : "no"}
-              onChange={(e) => toggleMultiGoal(e.target.value === "yes")}
+              id="cashflow_mode"
+              value={value.cashflow_mode ?? "none"}
+              onChange={(e) => patch({ cashflow_mode: e.target.value as SimulateRequest["cashflow_mode"] })}
             >
-              <option value="no">Single withdrawal</option>
-              <option value="yes">Multiple goals</option>
+              <option value="none">No contributions or withdrawals</option>
+              <option value="contribute">Contribute fixed amount periodically</option>
+              <option value="withdraw_fixed">Withdraw fixed amount periodically</option>
+              <option value="withdraw_percent">Withdraw fixed percentage periodically</option>
+              <option value="rolling_average_spending">Rolling average spending rule</option>
+              <option value="geometric_spending">Geometric spending rule</option>
+              <option value="withdraw_life_expectancy">Withdraw based on life expectancy</option>
             </select>
           </div>
+          {value.cashflow_mode && value.cashflow_mode !== "none" ? (
+            <>
+              <div className="form-field">
+                <label htmlFor="cashflow_amount">Amount</label>
+                <input
+                  className="field num"
+                  id="cashflow_amount"
+                  min={0}
+                  type="number"
+                  value={value.cashflow_amount ?? 0}
+                  onChange={(e) => patch({ cashflow_amount: Number(e.target.value) })}
+                  onBlur={() => markTouched("cashflow_amount")}
+                />
+                {fieldError("cashflow_amount") && <div className="field-error">{fieldError("cashflow_amount")}</div>}
+              </div>
+              <div className="form-field">
+                <label htmlFor="cashflow_inflation_adjusted">Inflation Adjusted</label>
+                <select
+                  className="field"
+                  id="cashflow_inflation_adjusted"
+                  value={value.cashflow_inflation_adjusted ? "yes" : "no"}
+                  onChange={(e) => patch({ cashflow_inflation_adjusted: e.target.value === "yes" })}
+                >
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </div>
+              <div className="form-field">
+                <label htmlFor="cashflow_frequency">Frequency</label>
+                <select
+                  className="field"
+                  id="cashflow_frequency"
+                  value={value.cashflow_frequency ?? "annually"}
+                  onChange={(e) => patch({ cashflow_frequency: e.target.value as SimulateRequest["cashflow_frequency"] })}
+                >
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Quarterly</option>
+                  <option value="annually">Annually</option>
+                </select>
+              </div>
+            </>
+          ) : null}
         </div>
 
-        {!multiGoal ? (
-          <div className="form-grid">
-            <div className="form-field">
-              <label htmlFor="cashflow_mode">Cashflow</label>
-              <select
-                className="field"
-                id="cashflow_mode"
-                value={value.cashflow_mode}
-                onChange={(e) => patch({ cashflow_mode: e.target.value as SimulateRequest["cashflow_mode"] })}
-              >
-                <option value="none">No contributions or withdrawals</option>
-                <option value="contribute">Contribute fixed amount periodically</option>
-                <option value="withdraw_fixed">Withdraw fixed amount periodically</option>
-                <option value="withdraw_percent">Withdraw fixed percentage periodically</option>
-                <option value="rolling_average_spending">Rolling average spending rule</option>
-                <option value="geometric_spending">Geometric spending rule</option>
-                <option value="withdraw_life_expectancy">Withdraw based on life expectancy</option>
-              </select>
-            </div>
-            {value.cashflow_mode !== "none" && (
-              <>
-                <div className="form-field">
-                  <label htmlFor="cashflow_amount">Amount</label>
-                  <input
-                    className="field num"
-                    id="cashflow_amount"
-                    min={0}
-                    type="number"
-                    value={value.cashflow_amount ?? 0}
-                    onChange={(e) => patch({ cashflow_amount: Number(e.target.value) })}
-                    onBlur={() => markTouched("cashflow_amount")}
-                  />
-                  {fieldError("cashflow_amount") && <div className="field-error">{fieldError("cashflow_amount")}</div>}
-                </div>
-                <div className="form-field">
-                  <label htmlFor="cashflow_inflation_adjusted">Inflation Adjusted</label>
-                  <select
-                    className="field"
-                    id="cashflow_inflation_adjusted"
-                    value={value.cashflow_inflation_adjusted ? "yes" : "no"}
-                    onChange={(e) => patch({ cashflow_inflation_adjusted: e.target.value === "yes" })}
-                  >
-                    <option value="yes">Yes</option>
-                    <option value="no">No</option>
-                  </select>
-                </div>
-                <div className="form-field">
-                  <label htmlFor="cashflow_frequency">Frequency</label>
-                  <select
-                    className="field"
-                    id="cashflow_frequency"
-                    value={value.cashflow_frequency ?? "annually"}
-                    onChange={(e) => patch({ cashflow_frequency: e.target.value as SimulateRequest["cashflow_frequency"] })}
-                  >
-                    <option value="monthly">Monthly</option>
-                    <option value="quarterly">Quarterly</option>
-                    <option value="annually">Annually</option>
-                  </select>
-                </div>
-              </>
-            )}
-          </div>
-        ) : (
-          <GoalsTable goals={value.goals ?? []} onChange={(goals) => patch({ goals })} />
-        )}
-
-        {/* ===== Multistage Planning (when multi-goal enabled) ===== */}
-        {multiGoal && (
-          <>
-            <div className="section-title" style={{ marginTop: 20 }}>Multistage Planning</div>
-            <div className="form-grid">
-              <div className="form-field">
-                <label htmlFor="years_to_retirement">Years to Retirement</label>
-                <input
-                  className="field num"
-                  id="years_to_retirement"
-                  min={1}
-                  type="number"
-                  value={value.years_to_retirement ?? 20}
-                  onChange={(e) => patch({ years_to_retirement: Number(e.target.value) })}
-                  onBlur={() => markTouched("years_to_retirement")}
-                />
-                {fieldError("years_to_retirement") && <div className="field-error">{fieldError("years_to_retirement")}</div>}
-              </div>
-              <div className="form-field">
-                <label htmlFor="glide_path_years">Glide Path Years</label>
-                <input
-                  className="field num"
-                  id="glide_path_years"
-                  min={1}
-                  type="number"
-                  value={value.glide_path_years ?? 10}
-                  onChange={(e) => patch({ glide_path_years: Number(e.target.value) })}
-                  onBlur={() => markTouched("glide_path_years")}
-                />
-                {fieldError("glide_path_years") && <div className="field-error">{fieldError("glide_path_years")}</div>}
-              </div>
-            </div>
-            <div className="section-title" style={{ marginTop: 20 }}>Retirement Portfolio Allocation</div>
-            <RetirementAllocationTable
-              funds={funds}
-              retirementHoldings={value.retirement_holdings ?? []}
-              onChange={(retirement_holdings) => patch({ retirement_holdings })}
-            />
-            {fieldError("retirement_holdings") && <div className="field-error">{fieldError("retirement_holdings")}</div>}
-          </>
-        )}
-
         {/* ===== Inflation & Rebalancing ===== */}
-        <div className="section-title" style={{ marginTop: 20 }}>Inflation &amp; Rebalancing</div>
+        <div className="section-title section-title-spaced">Inflation &amp; Rebalancing</div>
         <div className="form-grid">
           <div className="form-field">
             <label htmlFor="inflation_model">Inflation Model</label>
@@ -421,7 +351,9 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
                   type="number"
                   value={value.inflation_mean ?? 0.03}
                   onChange={(e) => patch({ inflation_mean: Number(e.target.value) })}
+                  onBlur={() => markTouched("inflation_mean")}
                 />
+                {fieldError("inflation_mean") && <div className="field-error">{fieldError("inflation_mean")}</div>}
               </div>
               <div className="form-field">
                 <label htmlFor="inflation_volatility">Volatility</label>
@@ -432,7 +364,9 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
                   type="number"
                   value={value.inflation_volatility ?? 0.01}
                   onChange={(e) => patch({ inflation_volatility: Number(e.target.value) })}
+                  onBlur={() => markTouched("inflation_volatility")}
                 />
+                {fieldError("inflation_volatility") && <div className="field-error">{fieldError("inflation_volatility")}</div>}
               </div>
             </>
           )}
@@ -501,6 +435,7 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
                       <option key={n} value={n}>Worst {n} Year{n > 1 ? "s" : ""} First</option>
                     ))}
                   </select>
+                  {fieldError("sequence_of_returns_risk") && <div className="field-error">{fieldError("sequence_of_returns_risk")}</div>}
                 </div>
                 {value.bootstrap_model === "block_of_years" && (
                   <div className="form-field">
@@ -512,7 +447,9 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
                       type="number"
                       value={value.block_years ?? 1}
                       onChange={(e) => patch({ block_years: Number(e.target.value) })}
+                      onBlur={() => markTouched("block_years")}
                     />
+                    {fieldError("block_years") && <div className="field-error">{fieldError("block_years")}</div>}
                   </div>
                 )}
               </>
@@ -524,15 +461,14 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
       {/* ===== Review Box ===== */}
       <div className="review-box">
         Run <b>{value.simulation_model}</b> simulation for <b>{value.simulation_period_years} years</b> with initial amount <b>{value.initial_amount.toLocaleString()}</b> using <b>{value.n_paths.toLocaleString()} paths</b>
-        {value.cashflow_mode !== "none" && !multiGoal ? <>, with <b>{value.cashflow_mode}</b> mode cashflows</> : null}
-        {multiGoal ? <>, with {goalsSummary}</> : null}
+        {value.cashflow_mode && value.cashflow_mode !== "none" ? <>, with <b>{value.cashflow_mode}</b> cashflows</> : null}
         {value.rebalancing !== "none" ? <>, rebalanced <b>{value.rebalancing}</b></> : null}.
       </div>
 
       {/* ===== Actions ===== */}
       <div className="actions">
         <button className="btn btn-ghost" onClick={onBack} type="button">&larr; Back</button>
-        <button className="btn btn-primary" disabled={running} onClick={onContinue} type="button">
+        <button className="btn btn-primary" disabled={!canContinue} onClick={onContinue} type="button">
           {running ? (
             <>
               <span className="spinner" /> Running&hellip;
@@ -541,204 +477,6 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, fu
             <>Continue to Results &rarr;</>
           )}
         </button>
-      </div>
-    </div>
-  );
-}
-
-function GoalsTable({ goals, onChange }: { goals: NamedGoal[]; onChange: (goals: NamedGoal[]) => void }) {
-  function addGoal() {
-    onChange([...goals, {
-      purpose: "", is_withdrawal: true, amount: 0, inflation_adjusted: true,
-      frequency: "annually", starts_year: 0, ends_year: 1,
-    }]);
-  }
-  function updateGoal(index: number, fields: Partial<NamedGoal>) {
-    onChange(goals.map((g, i) => (i === index ? { ...g, ...fields } : g)));
-  }
-  function removeGoal(index: number) {
-    onChange(goals.filter((_, i) => i !== index));
-  }
-  return (
-    <div className="goals-table">
-      <div className="goals-head">
-        <div>Purpose</div>
-        <div>Type</div>
-        <div>Amount</div>
-        <div>Starts</div>
-        <div>Ends</div>
-        <div>Frequency</div>
-        <div />
-      </div>
-      {goals.map((goal, index) => (
-        <div className="goal-row" key={index}>
-          <input
-            className="field"
-            placeholder="Purpose"
-            maxLength={60}
-            value={goal.purpose}
-            onChange={(e) => updateGoal(index, { purpose: e.target.value })}
-            onBlur={() => {
-              const trimmed = goal.purpose.trim();
-              if (trimmed !== goal.purpose) updateGoal(index, { purpose: trimmed });
-            }}
-          />
-          <select className="field" value={goal.is_withdrawal ? "withdraw" : "contribute"}
-            onChange={(e) => updateGoal(index, { is_withdrawal: e.target.value === "withdraw" })}>
-            <option value="contribute">Contribute</option>
-            <option value="withdraw">Withdraw</option>
-          </select>
-          <div className="form-field">
-            <input className="field" type="number" placeholder="Amount" value={goal.amount} onChange={(e) => updateGoal(index, { amount: Number(e.target.value) })} />
-            {!(goal.amount > 0) && <div className="field-error">Amount must be greater than 0.</div>}
-          </div>
-          <div className="form-field">
-            <input className="field" type="number" placeholder="Starts (year)" value={goal.starts_year} onChange={(e) => updateGoal(index, { starts_year: Number(e.target.value) })} />
-            {goal.starts_year < 0 && <div className="field-error">Start year cannot be negative.</div>}
-          </div>
-          <div className="form-field">
-            <input className="field" type="number" placeholder="Ends (year)" value={goal.ends_year} onChange={(e) => updateGoal(index, { ends_year: Number(e.target.value) })} />
-            {goal.ends_year <= goal.starts_year && <div className="field-error">End year must be after start year.</div>}
-          </div>
-          <select className="field" value={goal.frequency} onChange={(e) => updateGoal(index, { frequency: e.target.value as NamedGoal["frequency"] })}>
-            <option value="monthly">Monthly</option>
-            <option value="quarterly">Quarterly</option>
-            <option value="annually">Annually</option>
-          </select>
-          <button aria-label="Remove goal" className="icon-btn" type="button" onClick={() => removeGoal(index)}>
-            <X size={15} />
-          </button>
-        </div>
-      ))}
-      <button type="button" className="add-asset" onClick={addGoal}>+ Add goal</button>
-    </div>
-  );
-}
-
-function RetirementAllocationTable({
-  funds,
-  retirementHoldings,
-  onChange
-}: {
-  funds: FundSummary[];
-  retirementHoldings: Holding[];
-  onChange: (holdings: Holding[]) => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [open, setOpen] = useState(false);
-
-  const selectedIds = new Set(retirementHoldings.map((h) => h.proj_id));
-  const filteredFunds = funds.filter((fund) => {
-    if (selectedIds.has(fund.proj_id) && retirementHoldings.some((h) => h.proj_id === fund.proj_id && h.proj_id)) return true;
-    const haystack = `${fund.proj_id} ${fund.proj_name_thai ?? ""}`.toLowerCase();
-    return haystack.includes(query.toLowerCase());
-  });
-
-  function addFund(fund: FundSummary) {
-    const existing = retirementHoldings.find((h) => h.proj_id === fund.proj_id);
-    if (!existing) {
-      onChange([...retirementHoldings, { proj_id: fund.proj_id, weight: 0 }]);
-    }
-    setQuery("");
-    setOpen(false);
-  }
-
-  function removeFund(projId: string) {
-    if (retirementHoldings.length <= 1) return;
-    onChange(retirementHoldings.filter((h) => h.proj_id !== projId));
-  }
-
-  function updateWeight(projId: string, weight: number) {
-    onChange(retirementHoldings.map((h) => (h.proj_id === projId ? { ...h, weight } : h)));
-  }
-
-  const total = retirementHoldings.reduce((sum, h) => sum + (h.weight || 0), 0);
-  const complete = Math.abs(total - 100) < 0.01 && retirementHoldings.length > 0;
-
-  function normalizeWeights() {
-    if (total <= 0) {
-      const share = 100 / retirementHoldings.length;
-      onChange(retirementHoldings.map((h) => ({ ...h, weight: share })));
-      return;
-    }
-    onChange(retirementHoldings.map((h) => ({ ...h, weight: (h.weight / total) * 100 })));
-  }
-
-  function clearWeights() {
-    onChange(retirementHoldings.map((h) => ({ ...h, weight: 0 })));
-  }
-
-  return (
-    <div className="form-grid" style={{ gridColumn: "1 / -1" }}>
-      <div className="holdings-table" style={{ gridColumn: "1 / -1" }}>
-        <div className="holdings-head">
-          <div>Fund</div>
-          <div>Weight %</div>
-          <div></div>
-        </div>
-        {retirementHoldings.map((holding) => {
-          const fund = funds.find((f) => f.proj_id === holding.proj_id);
-          return (
-            <div className="holdings-row" key={holding.proj_id}>
-              <div className="fund-field">
-                <input
-                  className="field fund-input"
-                  value={fund ? (fund.proj_name_thai || fund.proj_id) : ""}
-                  disabled
-                  placeholder="Fund"
-                />
-              </div>
-              <input
-                className="field num"
-                type="number"
-                min={0}
-                max={100}
-                step={0.1}
-                value={holding.weight}
-                onChange={(e) => updateWeight(holding.proj_id, Number(e.target.value))}
-              />
-              <button className="icon-btn" onClick={() => removeFund(holding.proj_id)} type="button">✕</button>
-            </div>
-          );
-        })}
-        <div style={{ position: "relative", gridColumn: "1 / -1" }}>
-          <input
-            className="field fund-input"
-            placeholder="Add fund..."
-            value={query}
-            onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
-            onFocus={() => setOpen(true)}
-            autoComplete="off"
-          />
-          {open && filteredFunds.length > 0 && (
-            <div className="fund-suggest open">
-              {filteredFunds.map((fund) => (
-                <button
-                  key={fund.proj_id}
-                  className="fund-suggest-item"
-                  onClick={() => addFund(fund)}
-                  type="button"
-                  style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 12px", border: 0, background: "none", cursor: "pointer", fontSize: "13px" }}
-                >
-                  {fund.proj_name_thai || fund.proj_id} <span style={{ display: "block", color: "var(--text-tertiary)", fontSize: "11.5px", marginTop: "2px" }}>{fund.proj_id}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-      <div className="holdings-foot" style={{ gridColumn: "1 / -1" }}>
-        <div className="holdings-foot-left">
-          <div className="weight-actions">
-            <button className="link-btn" onClick={normalizeWeights} type="button">Normalize to 100%</button>
-            <span aria-hidden="true">&middot;</span>
-            <button className="link-btn" onClick={clearWeights} type="button">Clear</button>
-          </div>
-        </div>
-        <div className="weight-total">
-          Total <span>{(Math.round(total * 10) / 10).toFixed(1)}%</span>
-          <span className={complete ? "pill ok" : "pill warn"}>{complete ? "ready" : "incomplete"}</span>
-        </div>
       </div>
     </div>
   );

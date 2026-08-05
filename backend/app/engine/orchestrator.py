@@ -57,11 +57,14 @@ def run_simulation(request: SimulateRequest, returns_df: pd.DataFrame) -> Simula
     else:
         raise ValueError(f"unknown simulation_model: {request.simulation_model}")
 
+    inflation_draws = _simulate_inflation_draws(request)
     goals_summary = None
     goal_dicts: list[dict] = []
     if request.multi_goal_enabled and request.goals:
         goal_dicts = [g.model_dump() for g in request.goals]
-        dollar_paths, goals_summary = apply_named_goals(growth_paths, request.initial_amount, goal_dicts)
+        dollar_paths, goals_summary = apply_named_goals(
+            growth_paths, request.initial_amount, goal_dicts, inflation_draws=inflation_draws,
+        )
     elif request.cashflow_mode != "none":
         # rolling_average_spending / geometric_spending / withdraw_life_expectancy are
         # not yet distinctly implemented (see Task 11's "Known follow-up" note) -- they
@@ -75,13 +78,13 @@ def run_simulation(request: SimulateRequest, returns_df: pd.DataFrame) -> Simula
             "inflation_adjusted": bool(request.cashflow_inflation_adjusted),
             "frequency": request.cashflow_frequency or "annually",
         }
-        dollar_paths = apply_cashflow(growth_paths, request.initial_amount, cashflow)
+        dollar_paths = apply_cashflow(
+            growth_paths, request.initial_amount, cashflow, inflation_draws=inflation_draws,
+        )
     else:
         dollar_paths = growth_paths * request.initial_amount
 
     normalized_paths = dollar_paths / request.initial_amount
-    inflation_draws = _simulate_inflation_draws(request)
-
     pct_table = percentile_table(
         normalized_paths, request.initial_amount,
         inflation_draws=inflation_draws, growth_only_paths=growth_paths,
@@ -107,8 +110,11 @@ def run_simulation(request: SimulateRequest, returns_df: pd.DataFrame) -> Simula
         "fan_chart": {p: (np.percentile(dollar_paths, p, axis=0)).tolist() for p in [10, 25, 50, 75, 90]},
         "survival_over_time": survival.tolist(),
     }
+    running_peak = np.maximum.accumulate(dollar_paths, axis=1)
+    max_drawdown = (dollar_paths / running_peak - 1.0).min(axis=1)
     distribution = {
         "ending_balance_histogram": dollar_paths[:, -1].tolist(),
+        "max_drawdown_histogram": max_drawdown.tolist(),
     }
     metrics = {
         "percentile_table": pct_table,
@@ -125,7 +131,6 @@ def run_simulation(request: SimulateRequest, returns_df: pd.DataFrame) -> Simula
         "annual_return_probability": annual_return_probability(normalized_paths),
         "loss_probability": loss_probability(normalized_paths, growth_only_paths=growth_paths),
     }
-
     goals_section = None
     if goals_summary is not None:
         goals_section = {

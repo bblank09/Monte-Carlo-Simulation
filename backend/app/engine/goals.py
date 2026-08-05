@@ -1,7 +1,12 @@
 import numpy as np
 
 
-def apply_cashflow(paths: np.ndarray, initial_amount: float, cashflow: dict) -> np.ndarray:
+def apply_cashflow(
+    paths: np.ndarray,
+    initial_amount: float,
+    cashflow: dict,
+    inflation_draws: np.ndarray | None = None,
+) -> np.ndarray:
     """Apply one annual contribution/withdrawal to normalized growth-factor paths, year
     by year, compounding on the resulting dollar balance each year.
 
@@ -25,6 +30,7 @@ def apply_cashflow(paths: np.ndarray, initial_amount: float, cashflow: dict) -> 
     sign = -1.0 if cashflow["is_withdrawal"] else 1.0
     is_percent = cashflow.get("is_percent", False)
     annual_rate_or_amount = _annualized_goal_amount(cashflow)
+    inflation_factors = _inflation_factors(inflation_draws, n_paths, n_years)
     values = np.empty((n_paths, n_years_plus_one))
     values[:, 0] = initial_amount
     for year in range(n_years):
@@ -32,7 +38,9 @@ def apply_cashflow(paths: np.ndarray, initial_amount: float, cashflow: dict) -> 
         if is_percent:
             amount = grown * (annual_rate_or_amount / 100.0)
         else:
-            amount = annual_rate_or_amount
+            amount = annual_rate_or_amount * (
+                inflation_factors[:, year] if cashflow.get("inflation_adjusted", False) else 1.0
+            )
         values[:, year + 1] = np.maximum(grown + sign * amount, 0.0)
     return values
 
@@ -48,13 +56,33 @@ def _annualized_goal_amount(goal: dict) -> float:
     return goal["amount"] * _FREQUENCY_MULTIPLIER[goal["frequency"]]
 
 
-def apply_named_goals(paths: np.ndarray, initial_amount: float, goals: list[dict]) -> tuple[np.ndarray, list[dict]]:
+def _inflation_factors(
+    inflation_draws: np.ndarray | None,
+    n_paths: int,
+    n_years: int,
+) -> np.ndarray:
+    """Return a cumulative inflation multiplier for every path and year."""
+    if inflation_draws is None:
+        return np.ones((n_paths, n_years))
+    expected_shape = (n_paths, n_years)
+    if inflation_draws.shape != expected_shape:
+        raise ValueError(f"inflation_draws must have shape {expected_shape}, got {inflation_draws.shape}")
+    return np.cumprod(1.0 + inflation_draws, axis=1)
+
+
+def apply_named_goals(
+    paths: np.ndarray,
+    initial_amount: float,
+    goals: list[dict],
+    inflation_draws: np.ndarray | None = None,
+) -> tuple[np.ndarray, list[dict]]:
     """Apply multiple named goals in chronological order (by starts_year), tracking a
     per-goal success rate: the fraction of paths whose balance stayed >= 0 throughout the
     goal's active window."""
     n_paths, n_years_plus_one = paths.shape
     n_years = n_years_plus_one - 1
     growth_factors = paths[:, 1:] / paths[:, :-1]
+    inflation_factors = _inflation_factors(inflation_draws, n_paths, n_years)
     values = np.empty((n_paths, n_years_plus_one))
     values[:, 0] = initial_amount
     solvent = np.ones(n_paths, dtype=bool)
@@ -66,7 +94,10 @@ def apply_named_goals(paths: np.ndarray, initial_amount: float, goals: list[dict
         for goal in goals:
             if goal["starts_year"] <= year < goal["ends_year"]:
                 sign = -1.0 if goal["is_withdrawal"] else 1.0
-                net_cashflow += sign * _annualized_goal_amount(goal)
+                if goal.get("inflation_adjusted", False):
+                    net_cashflow += sign * _annualized_goal_amount(goal) * inflation_factors[:, year]
+                else:
+                    net_cashflow += sign * _annualized_goal_amount(goal)
         new_balance = grown + net_cashflow
         solvent &= new_balance >= 0
         values[:, year + 1] = np.maximum(new_balance, 0.0)
@@ -114,20 +145,23 @@ def build_cashflow_series(paths: np.ndarray, initial_amount: float, goals: list[
     per-path cumulative inflation factor; without it, present-dollar == nominal."""
     n_years = paths.shape[1] - 1
     nominal = np.zeros(n_years)
+    inflation_factors = _inflation_factors(inflation_draws, paths.shape[0], n_years)
+    median_inflation_factors = np.median(inflation_factors, axis=0)
     for year in range(n_years):
         net = 0.0
         for goal in goals:
             if goal["starts_year"] <= year < goal["ends_year"]:
                 sign = -1.0 if goal["is_withdrawal"] else 1.0
-                net += sign * _annualized_goal_amount(goal)
+                amount = _annualized_goal_amount(goal)
+                if goal.get("inflation_adjusted", False):
+                    amount *= median_inflation_factors[year]
+                net += sign * amount
         nominal[year] = net
 
     if inflation_draws is None:
         present_dollar = nominal.copy()
     else:
-        median_inflation = np.median(inflation_draws, axis=0)  # shape (n_years,)
-        cumulative_factor = np.cumprod(1 + median_inflation)
-        present_dollar = nominal / cumulative_factor
+        present_dollar = nominal / median_inflation_factors
 
     return {
         "cashflows_nominal": nominal.tolist(),

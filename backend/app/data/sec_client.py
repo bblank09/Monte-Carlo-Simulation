@@ -12,17 +12,20 @@ BASE_URL = "https://api.sec.or.th"
 
 # Local cache, matching CLAUDE.md's documented data-flow ("SEC Open Data API ->
 # backend/app/data/ -> data/processed/nav_panel.parquet (cache) -> backend/app/engine/").
-# find_equity_funds() and get_daily_nav() below read this cache exclusively -- no live
-# SEC API call happens on the request path (mirrors ../Backtest Portfolio Webull:SEC
-# OPENAI's backend/app/sec/cache.py pattern, which this project's own doc comment
-# already specified but never implemented until now). The live SEC Open Data API is
-# slow and occasionally flaky (see the project's e2e test comments) and every request
-# hitting it directly meant "Load an example portfolio" and /api/simulate could each
-# take 30-90s or outright 500 on a transient timeout -- a local cache removes that
-# entirely from the app's hot path.
+# find_funds()/find_equity_funds() and get_daily_nav() below read this cache exclusively
+# -- no live SEC API call happens on the request path (mirrors ../Backtest Portfolio
+# Webull:SEC OPENAI's backend/app/sec/cache.py pattern). The live SEC Open Data API is
+# slow and occasionally flaky, so a local cache keeps the app's hot path reproducible.
 DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "processed"
 FUND_UNIVERSE_PATH = DATA_DIR / "fund_universe.csv"
 NAV_PANEL_PATH = DATA_DIR / "nav_panel.parquet"
+
+
+def _clean_cache_value(value, default=None):
+    """Convert pandas missing/scalar values to JSON-safe Python values."""
+    if value is None or pd.isna(value):
+        return default
+    return value.item() if hasattr(value, "item") else value
 
 
 def _headers():
@@ -47,6 +50,11 @@ def _load_fund_universe() -> pd.DataFrame:
     return pd.read_csv(FUND_UNIVERSE_PATH)
 
 
+def find_funds() -> list[dict]:
+    """Return the complete SEC fund universe using Backtest's exact API shape."""
+    return _load_fund_universe().fillna("").to_dict(orient="records")
+
+
 def find_equity_funds(policy_desc: str = "ตราสารทุน"):
     """Equity funds (policy_desc match, main share class) from the local fund-universe
     cache -- shaped like the raw SEC general-info/profiles API items (proj_name_th,
@@ -58,13 +66,29 @@ def find_equity_funds(policy_desc: str = "ตราสารทุน"):
     ]
     return [
         {
-            "proj_id": row["proj_id"],
+            "proj_id": _clean_cache_value(row["proj_id"], ""),
             # The cache stores a short display_name (e.g. "K-SET50"), not SEC's full
             # official Thai fund name -- close enough for search/selection, and this
             # project never had the full proj_name_th field cached either way.
-            "proj_name_th": row["display_name"],
-            "comp_name_th": row["amc_name_th"],
-            "policy_desc": row["policy_desc"],
+            "proj_name_th": _clean_cache_value(row["display_name"], ""),
+            "comp_name_th": _clean_cache_value(row["amc_name_th"], ""),
+            # Keep the full display/search contract that the sibling Backtest
+            # Portfolio picker uses. The Monte Carlo engine still consumes
+            # only proj_id; these fields are presentation metadata.
+            "display_name": _clean_cache_value(row["display_name"], ""),
+            "fund_class_name": _clean_cache_value(row["fund_class_name"], ""),
+            "search_term": _clean_cache_value(row.get("search_term", row["policy_desc"]), ""),
+            "amc_name_th": _clean_cache_value(row["amc_name_th"], ""),
+            "amc_name_en": _clean_cache_value(row.get("amc_name_en", ""), ""),
+            "policy_desc": _clean_cache_value(row["policy_desc"], ""),
+            "nav_start": _clean_cache_value(row.get("nav_start")),
+            "nav_end": _clean_cache_value(row.get("nav_end")),
+            "nav_months": _clean_cache_value(row.get("nav_months")),
+            "nav_span_months": _clean_cache_value(row.get("nav_span_months")),
+            "nav_completeness": _clean_cache_value(row.get("nav_completeness")),
+            "nav_gap_count": _clean_cache_value(row.get("nav_gap_count"), 0),
+            "nav_largest_gap_start": _clean_cache_value(row.get("nav_largest_gap_start")),
+            "nav_largest_gap_end": _clean_cache_value(row.get("nav_largest_gap_end")),
         }
         for _, row in matched.iterrows()
     ]

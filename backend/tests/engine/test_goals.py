@@ -1,5 +1,11 @@
 import numpy as np
-from backend.app.engine.goals import apply_cashflow, apply_named_goals, glide_path_weights, build_cashflow_series
+
+from backend.app.engine.goals import (
+    apply_cashflow,
+    apply_named_goals,
+    build_cashflow_series,
+    glide_path_weights,
+)
 
 
 def test_apply_cashflow_withdrawal_reduces_balance():
@@ -78,6 +84,19 @@ def test_apply_cashflow_percent_withdrawal_scales_by_frequency():
     assert np.isclose(1_000.0 - annual[0, 1], 10.0)
 
 
+def test_apply_cashflow_inflation_adjusted_amount_tracks_simulated_inflation():
+    paths = np.ones((1, 4))
+    inflation_draws = np.full((1, 3), 0.10)
+    values = apply_cashflow(paths, initial_amount=1000.0, cashflow={
+        "amount": 100.0, "is_withdrawal": True, "inflation_adjusted": True,
+        "frequency": "annually",
+    }, inflation_draws=inflation_draws)
+    # The entered amount is today's dollars, so each future annual withdrawal is
+    # increased by the cumulative simulated inflation path: 110, then 121.
+    assert np.isclose(values[0, 1], 890.0)
+    assert np.isclose(values[0, 2], 769.0)
+
+
 def test_apply_named_goals_reports_success_rate():
     paths = np.ones((10, 4))
     goals = [
@@ -88,6 +107,18 @@ def test_apply_named_goals_reports_success_rate():
     assert values.shape == (10, 4)
     assert summary[0]["purpose"] == "Savings"
     assert summary[0]["success_rate"] == 1.0  # contributions only, can't go negative
+
+
+def test_apply_named_goals_inflation_adjusted_amount_tracks_simulated_inflation():
+    paths = np.ones((1, 4))
+    goals = [
+        {"purpose": "Education", "amount": 100.0, "is_withdrawal": True, "inflation_adjusted": True,
+         "frequency": "annually", "starts_year": 0, "ends_year": 3},
+    ]
+    inflation_draws = np.full((1, 3), 0.10)
+    values, _ = apply_named_goals(paths, initial_amount=1000.0, goals=goals, inflation_draws=inflation_draws)
+    assert np.isclose(values[0, 1], 890.0)
+    assert np.isclose(values[0, 2], 769.0)
 
 
 def test_apply_named_goals_scales_amount_by_frequency():
@@ -162,3 +193,15 @@ def test_build_cashflow_series_present_dollar_discounts_with_inflation():
     # for a negative (withdrawal) cashflow, "discounted" means smaller magnitude
     # (closer to zero), not a smaller signed value.
     assert abs(series["cashflows_present_dollar"][1]) < abs(series["cashflows_nominal"][1])
+
+
+def test_build_cashflow_series_inflation_adjusted_goal_keeps_real_amount_constant():
+    paths = np.ones((5, 4))
+    goals = [
+        {"purpose": "Education", "amount": 100.0, "is_withdrawal": True, "inflation_adjusted": True,
+         "frequency": "annually", "starts_year": 0, "ends_year": 3},
+    ]
+    inflation_draws = np.full((5, 3), 0.10)
+    series = build_cashflow_series(paths, initial_amount=1000.0, goals=goals, inflation_draws=inflation_draws)
+    assert np.allclose(series["cashflows_nominal"], [-110.0, -121.0, -133.1])
+    assert np.allclose(series["cashflows_present_dollar"], [-100.0, -100.0, -100.0])

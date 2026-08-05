@@ -1,5 +1,4 @@
 import numpy as np
-from arch import arch_model
 
 
 def simulate_forecasted(mu, sigma, weights, config, returns_df=None):
@@ -24,6 +23,16 @@ def _garch_annual_returns(returns_df, weights, port_mu, n_years, n_paths, rng):
     with mean="Zero" - the drift (port_mu) is added back explicitly afterwards. See
     CLAUDE.md landmines: arch_model's mean="Constant" MLE produces absurd drift estimates
     on this data (~19.9%/yr annualized vs. ~12.2%/yr simple historical mean)."""
+    # Keep the GARCH dependency lazy so endpoints that only expose the fund
+    # universe (and tests for those endpoints) do not fail during module
+    # collection when the optional runtime dependency is unavailable. The
+    # production image still installs `arch` from pyproject.toml before a
+    # user can select the GARCH model.
+    try:
+        from arch import arch_model
+    except ModuleNotFoundError as exc:
+        raise RuntimeError("GARCH simulation requires the 'arch' package") from exc
+
     port_returns_daily = returns_df.to_numpy() @ weights
     demeaned_pct = (port_returns_daily - port_returns_daily.mean()) * 100
     am = arch_model(demeaned_pct, vol="Garch", p=1, q=1, dist="normal", mean="Zero")

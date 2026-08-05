@@ -7,7 +7,7 @@ import { test, expect } from "@playwright/test";
 // playwright.config.ts and CLAUDE.md's "Landmines" section).
 test.setTimeout(180_000);
 
-test("build a portfolio, run a historical simulation, and see results", async ({ page }) => {
+test("build a portfolio, run a historical simulation, and see results", async ({ page, browser }) => {
   await page.goto("/");
 
   // Portfolio step. "Load an example portfolio" depends on /api/funds having
@@ -21,12 +21,12 @@ test("build a portfolio, run a historical simulation, and see results", async ({
     await expect(page.getByText("100%", { exact: true })).toBeVisible();
   }).toPass({ timeout: 60_000 });
 
-  const continueToParams = page.getByRole("button", { name: /continue to parameters/i });
+  const continueToParams = page.getByRole("button", { name: /continue to assumptions/i });
   await expect(continueToParams).toBeEnabled({ timeout: 30_000 });
   await continueToParams.click();
 
   // Parameters step
-  await expect(page.getByText("Set your simulation parameters")).toBeVisible();
+  await expect(page.getByText("Set your simulation assumptions")).toBeVisible();
   const continueToResults = page.getByRole("button", { name: /continue to results/i });
   await expect(continueToResults).toBeVisible();
   // Guard against the step-transition fade animation making the click land
@@ -38,6 +38,39 @@ test("build a portfolio, run a historical simulation, and see results", async ({
   await expect(page.getByRole("button", { name: /running/i })).toBeVisible({ timeout: 15_000 });
 
   // Results step
-  await expect(page.getByText(/survived all withdrawals/i)).toBeVisible({ timeout: 120_000 });
+  await expect(page.getByText(/ended with a positive balance|funded the configured cashflows/i)).toBeVisible({ timeout: 120_000 });
   await expect(page.getByRole("button", { name: "Growth" })).toBeVisible();
+  await expect(page).toHaveURL(/[?&]run=run_\d{8}_\d{6}_[0-9a-f]{8}/);
+  await expect(page.getByRole("button", { name: "Result JSON" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Copy shareable link" })).toBeVisible();
+
+  // Results tabs. Each tab should render its decision-oriented section without a
+  // runtime error, while keeping the same tab set as the Backtest shell.
+  const tabChecks = [
+    ["Overview", /Decision summary/],
+    ["Growth", /Projected value milestones/],
+    ["Distribution", /Probability of Ending Below Target/],
+    ["Metrics", /Performance outcomes/],
+    ["Risk & Correlation", /Loss probability/],
+    ["Report", /Simulation diagnostics/],
+  ] as const;
+  for (const [tab, heading] of tabChecks) {
+    await page.getByRole("button", { name: tab, exact: true }).click();
+    await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+    if (tab === "Distribution") {
+      await expect(page.getByLabel("Target ending balance")).toBeVisible();
+      await expect(page.getByText(/of paths end at or below target/i)).toBeVisible();
+    }
+  }
+
+  const sharedUrl = page.url();
+  const visitorContext = await browser.newContext();
+  const visitorPage = await visitorContext.newPage();
+  try {
+    await visitorPage.goto(sharedUrl);
+    await expect(visitorPage.getByRole("heading", { name: /Historical model · 30-year horizon/ })).toBeVisible({ timeout: 30_000 });
+    await expect(visitorPage.getByRole("button", { name: "Result JSON" })).toBeVisible();
+  } finally {
+    await visitorContext.close();
+  }
 });

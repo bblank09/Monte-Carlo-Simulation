@@ -26,9 +26,22 @@ export async function postSimulate(request: SimulateRequest): Promise<SimulateRe
   return resp.json();
 }
 
+export async function fetchSimulationByRunId(runId: string): Promise<SimulateResponse> {
+  const resp = await fetch(`${API_BASE}/simulate/${encodeURIComponent(runId)}`);
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error(`simulation run load failed: ${resp.status} ${body}`);
+  }
+  return resp.json();
+}
+
 export async function getFunds(): Promise<FundSummary[]> {
   if (USE_MOCK) return mockFunds;
   const resp = await fetch(`${API_BASE}/funds`);
   if (!resp.ok) throw new Error(`funds fetch failed: ${resp.status}`);
-  return resp.json();
+  const payload = (await resp.json()) as { data_source?: string; funds?: FundSummary[] };
+  if (payload.data_source && payload.data_source !== "sec_open_data") {
+    throw new Error("Production app accepts SEC Open Data funds only.");
+  }
+  return payload.funds ?? [];
 }

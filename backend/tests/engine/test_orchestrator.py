@@ -1,7 +1,8 @@
 import numpy as np
 import pandas as pd
 import pytest
-from backend.app.domain.schemas import SimulateRequest, Holding
+
+from backend.app.domain.schemas import Holding, SimulateRequest
 from backend.app.engine.orchestrator import run_simulation
 
 
@@ -26,6 +27,8 @@ def test_historical_request_produces_all_response_sections():
     assert response.overview["survived_count"] >= 0
     assert set(response.metrics["percentile_table"]["ending_balance"].keys()) == {10, 25, 50, 75, 90}
     assert "fan_chart" in response.growth
+    assert len(response.distribution["ending_balance_histogram"]) == req.n_paths
+    assert len(response.distribution["max_drawdown_histogram"]) == req.n_paths
     assert response.goals is None
 
 

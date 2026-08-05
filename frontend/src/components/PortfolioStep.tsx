@@ -15,9 +15,10 @@ interface Facet {
   count: number;
 }
 
-// SEC's policy_desc is a Thai-language category label from the API. Mirrors
-// ../Backtest Portfolio Webull:SEC OPENAI/frontend/src/components/PortfolioStep.tsx's
-// CATEGORY_LABELS_EN -- verified against the same underlying SEC fund universe.
+// SEC's policy_desc is a Thai-language category label from the API. This
+// map covers every value observed in the full 800-fund universe (checklist
+// 8.8) -- verified against data/sec/mvp_fund_universe.csv, not just the
+// handful of categories the original 12-fund universe happened to have.
 const CATEGORY_LABELS_EN: Record<string, string> = {
   "ตราสารทุน": "Equity",
   "ตราสารหนี้": "Fixed Income",
@@ -31,44 +32,38 @@ function categoryLabel(value: string) {
   return CATEGORY_LABELS_EN[value] ?? value;
 }
 
-function fundDisplayName(fund: FundSummary): string {
-  return fund.proj_name_thai || fund.proj_id;
+// Concrete, checkable coverage text instead of an abstract percentage --
+// names the actual gap (matches scripts/sec_annotate_universe_coverage.py's
+// nav_gap_count/nav_largest_gap_start/nav_largest_gap_end) so a user can
+// tell at a glance whether it overlaps their intended backtest window.
+function formatCoverage(fund: FundSummary): string | null {
+  if (!fund.nav_start || !fund.nav_end) return null;
+  const range = `${fund.nav_start.slice(0, 7)} to ${fund.nav_end.slice(0, 7)}`;
+  const gapCount = fund.nav_gap_count ?? 0;
+  if (gapCount === 0) return range;
+  if (gapCount === 1 && fund.nav_largest_gap_start && fund.nav_largest_gap_end) {
+    return `${range} · gap ${fund.nav_largest_gap_start} to ${fund.nav_largest_gap_end}`;
+  }
+  const months = fund.nav_months ?? 0;
+  const span = fund.nav_span_months ?? 0;
+  return `${range} · data only ${months}/${span} months (reports infrequently)`;
 }
 
-function buildFacets(
-  funds: FundSummary[],
-  field: "amc_name_thai" | "policy_desc",
-  otherFilter: Set<string>,
-  otherField: "amc_name_thai" | "policy_desc"
-) {
+function buildFacets(funds: FundSummary[], field: "amc_name_en" | "policy_desc", otherFilter: Set<string>, otherField: "amc_name_en" | "policy_desc") {
   const counts = new Map<string, number>();
   for (const fund of funds) {
     const key = fund[field];
     if (!key) continue;
-    if (otherFilter.size && !otherFilter.has(fund[otherField] ?? "")) continue;
+    if (otherFilter.size && !otherFilter.has(fund[otherField])) continue;
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
-  const built = Array.from(counts.entries()).map(([value, count]) => ({ value, count }));
-  return built.sort((a, b) => a.value.localeCompare(b.value));
-}
-
-// Cross-filtering can drop the very value the user has selected (built from
-// counts that exclude it under the OTHER active filter) -- always keep an
-// active selection visible in its own list, even at 0 count, so it stays
-// toggleable and isn't only escapable via "Clear all filters".
-function withSelectedFacets(facets: Facet[], selected: Set<string>): Facet[] {
-  if (!selected.size) return facets;
-  const present = new Set(facets.map((facet) => facet.value));
-  const missing = Array.from(selected)
-    .filter((value) => !present.has(value))
-    .map((value) => ({ value, count: 0 }));
-  if (!missing.length) return facets;
-  return [...facets, ...missing].sort((a, b) => a.value.localeCompare(b.value));
+  return Array.from(counts.entries())
+    .map(([value, count]) => ({ value, count }))
+    .sort((a, b) => a.value.localeCompare(b.value));
 }
 
 interface Props {
   funds: FundSummary[];
-  fundsLoading?: boolean;
   active: boolean;
   onHoldingsChange: (holdings: Holding[]) => void;
   onContinue: () => void;
@@ -82,7 +77,7 @@ function nextKey() {
   return `row-${rowSeq}`;
 }
 
-export function PortfolioStep({ funds, fundsLoading = false, active, onHoldingsChange, onContinue }: Props) {
+export function PortfolioStep({ funds, active, onHoldingsChange, onContinue }: Props) {
   const [rows, setRows] = useState<Row[]>([{ key: nextKey(), projId: "", weight: 0, query: "" }]);
   const [amcFilter, setAmcFilter] = useState<Set<string>>(new Set());
   const [categoryFilter, setCategoryFilter] = useState<Set<string>>(new Set());
@@ -91,19 +86,19 @@ export function PortfolioStep({ funds, fundsLoading = false, active, onHoldingsC
   const fundsById = useMemo(() => new Map(funds.map((fund) => [fund.proj_id, fund])), [funds]);
 
   const amcFacets = useMemo(
-    () => withSelectedFacets(buildFacets(funds, "amc_name_thai", categoryFilter, "policy_desc"), amcFilter),
-    [funds, categoryFilter, amcFilter]
+    () => buildFacets(funds, "amc_name_en", categoryFilter, "policy_desc"),
+    [funds, categoryFilter]
   );
   const categoryFacets = useMemo(
-    () => withSelectedFacets(buildFacets(funds, "policy_desc", amcFilter, "amc_name_thai"), categoryFilter),
-    [funds, amcFilter, categoryFilter]
+    () => buildFacets(funds, "policy_desc", amcFilter, "amc_name_en"),
+    [funds, amcFilter]
   );
 
   const filteredFunds = useMemo(
     () =>
       funds.filter((fund) => {
-        if (amcFilter.size && (!fund.amc_name_thai || !amcFilter.has(fund.amc_name_thai))) return false;
-        if (categoryFilter.size && (!fund.policy_desc || !categoryFilter.has(fund.policy_desc))) return false;
+        if (amcFilter.size && !amcFilter.has(fund.amc_name_en)) return false;
+        if (categoryFilter.size && !categoryFilter.has(fund.policy_desc)) return false;
         return true;
       }),
     [funds, amcFilter, categoryFilter]
@@ -132,17 +127,17 @@ export function PortfolioStep({ funds, fundsLoading = false, active, onHoldingsC
 
   function commit(nextRows: Row[]) {
     setRows(nextRows);
-    const holdings: Holding[] = nextRows
+    const nextHoldings: Holding[] = nextRows
       .filter((row) => row.projId)
       .map((row) => ({
         proj_id: row.projId,
         weight: row.weight
       }));
-    onHoldingsChange(holdings);
+    onHoldingsChange(nextHoldings);
   }
 
   function seedRows(picks: { fund: FundSummary; weight: number }[]) {
-    commit(picks.map(({ fund, weight }) => ({ key: nextKey(), projId: fund.proj_id, weight, query: fundDisplayName(fund) })));
+    commit(picks.map(({ fund, weight }) => ({ key: nextKey(), projId: fund.proj_id, weight, query: fund.display_name })));
   }
 
   function addRow() {
@@ -155,7 +150,7 @@ export function PortfolioStep({ funds, fundsLoading = false, active, onHoldingsC
   }
 
   function selectFund(key: string, fund: FundSummary) {
-    commit(rows.map((row) => (row.key === key ? { ...row, projId: fund.proj_id, query: fundDisplayName(fund) } : row)));
+    commit(rows.map((row) => (row.key === key ? { ...row, projId: fund.proj_id, query: fund.display_name } : row)));
   }
 
   function setQuery(key: string, query: string) {
@@ -232,47 +227,34 @@ export function PortfolioStep({ funds, fundsLoading = false, active, onHoldingsC
           <button className="link-btn" onClick={loadExample} type="button">Load an example portfolio</button>
         </div>
 
-        {fundsLoading && funds.length === 0 ? (
-          <div className="holdings-table" aria-busy="true" aria-label="Loading funds">
-            <div className="holdings-head">
-              <div>SEC Fund</div>
-              <div>Weight %</div>
-              <div />
-            </div>
-            <div className="skeleton skeleton-pulse" style={{ height: 44, borderRadius: "var(--r-sm)" }} />
-            <div className="skeleton skeleton-pulse" style={{ height: 44, borderRadius: "var(--r-sm)" }} />
-            <div className="skeleton skeleton-pulse" style={{ height: 44, borderRadius: "var(--r-sm)" }} />
+        <div className="holdings-table">
+          <div className="holdings-head">
+            <div>SEC Fund</div>
+            <div>Weight %</div>
+            <div />
           </div>
-        ) : (
-          <div className="holdings-table">
-            <div className="holdings-head">
-              <div>SEC Fund</div>
-              <div>Weight %</div>
-              <div />
-            </div>
-            {rows.map((row) => (
-              <HoldingsRow
-                key={row.key}
-                row={row}
-                funds={filteredFunds}
-                allFunds={funds}
-                selectedIds={selectedIds}
-                canRemove={rows.length > 1}
-                amcFacets={amcFacets}
-                amcFilter={amcFilter}
-                categoryFacets={categoryFacets}
-                categoryFilter={categoryFilter}
-                onToggleAmc={(value) => toggleFilter(setAmcFilter, value)}
-                onToggleCategory={(value) => toggleFilter(setCategoryFilter, value)}
-                onClearFilters={clearAllFilters}
-                onSelect={(fund) => selectFund(row.key, fund)}
-                onQueryChange={(query) => setQuery(row.key, query)}
-                onWeightChange={(weight) => setWeight(row.key, weight)}
-                onRemove={() => removeRow(row.key)}
-              />
-            ))}
-          </div>
-        )}
+          {rows.map((row) => (
+            <HoldingsRow
+              key={row.key}
+              row={row}
+              funds={filteredFunds}
+              allFunds={funds}
+              selectedIds={selectedIds}
+              canRemove={rows.length > 1}
+              amcFacets={amcFacets}
+              categoryFacets={categoryFacets}
+              amcFilter={amcFilter}
+              categoryFilter={categoryFilter}
+              onToggleAmc={(value) => toggleFilter(setAmcFilter, value)}
+              onToggleCategory={(value) => toggleFilter(setCategoryFilter, value)}
+              onClearFilters={clearAllFilters}
+              onSelect={(fund) => selectFund(row.key, fund)}
+              onQueryChange={(query) => setQuery(row.key, query)}
+              onWeightChange={(weight) => setWeight(row.key, weight)}
+              onRemove={() => removeRow(row.key)}
+            />
+          ))}
+        </div>
 
         <div className="holdings-foot">
           <div className="holdings-foot-left">
@@ -296,7 +278,7 @@ export function PortfolioStep({ funds, fundsLoading = false, active, onHoldingsC
 
       <div className="actions">
         <span className="footnote">Step 1 of 3 &mdash; portfolio weights must sum to 100%.</span>
-        <button className="btn btn-primary" disabled={!complete} onClick={onContinue} type="button">Continue to Parameters &rarr;</button>
+        <button className="btn btn-primary" disabled={!complete} onClick={onContinue} type="button">Continue to Assumptions &rarr;</button>
       </div>
     </div>
   );
@@ -309,8 +291,8 @@ function HoldingsRow({
   selectedIds,
   canRemove,
   amcFacets,
-  amcFilter,
   categoryFacets,
+  amcFilter,
   categoryFilter,
   onToggleAmc,
   onToggleCategory,
@@ -326,8 +308,8 @@ function HoldingsRow({
   selectedIds: Set<string>;
   canRemove: boolean;
   amcFacets: Facet[];
-  amcFilter: Set<string>;
   categoryFacets: Facet[];
+  amcFilter: Set<string>;
   categoryFilter: Set<string>;
   onToggleAmc: (value: string) => void;
   onToggleCategory: (value: string) => void;
@@ -344,18 +326,18 @@ function HoldingsRow({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const fieldRef = useRef<HTMLDivElement | null>(null);
   const fund = allFunds.find((item) => item.proj_id === row.projId);
-  const displayValue = fund ? fundDisplayName(fund) : row.query;
+  const displayValue = fund ? fund.display_name : row.query;
 
   const query = row.projId ? "" : row.query.trim().toLowerCase();
   const options = funds.filter((item) => {
     if (selectedIds.has(item.proj_id) && item.proj_id !== row.projId) return false;
     if (!query) return true;
-    const haystack = `${item.proj_id} ${item.proj_name_thai ?? ""} ${item.amc_name_thai ?? ""} ${item.policy_desc ?? ""}`.toLowerCase();
+    const haystack = `${item.proj_id} ${item.display_name} ${item.fund_class_name} ${item.search_term} ${item.amc_name_en} ${item.policy_desc}`.toLowerCase();
     return haystack.includes(query);
   });
   // Show every match, not just the first few -- the dropdown already has a
   // fixed max-height with overflow-y: auto (see .fund-suggest in styles.css),
-  // so with a large fund universe a hard cap here would silently hide
+  // so with 800+ funds in the universe a hard cap here would silently hide
   // matches the user has no way to scroll to.
   const visibleOptions = options;
   const listboxId = `${row.key}-listbox`;
@@ -398,19 +380,20 @@ function HoldingsRow({
           aria-autocomplete="list"
           aria-controls={listboxId}
           aria-expanded={open}
-          aria-label="Search SEC fund by name or proj_id"
+          aria-label="Search SEC fund by name, class, or proj_id"
           className="field fund-input"
           ref={inputRef}
           role="combobox"
           value={displayValue}
-          placeholder="Search fund name or proj_id..."
+          placeholder="Search fund name, class, or proj_id..."
           onFocus={() => { setOpen(true); setHighlight(0); }}
           onChange={(event) => { onQueryChange(event.target.value); setOpen(true); setHighlight(0); }}
           onKeyDown={handleKeyDown}
           autoComplete="off"
         />
+        {fund && formatCoverage(fund) ? <p className="fund-coverage-hint">{formatCoverage(fund)}</p> : null}
         <div className={open ? "fund-suggest open" : "fund-suggest"}>
-          {amcFacets.length || categoryFacets.length > 1 ? (
+          {amcFacets.length || categoryFacets.length ? (
             <div className="fund-suggest-filters">
               <button
                 className="fund-suggest-filter-toggle"
@@ -432,7 +415,7 @@ function HoldingsRow({
                   {amcFacets.length ? (
                     <FacetGroup label="AMC" facets={amcFacets} selected={amcFilter} onToggle={onToggleAmc} />
                   ) : null}
-                  {categoryFacets.length > 1 ? (
+                  {categoryFacets.length ? (
                     <FacetGroup facets={categoryFacets} formatLabel={categoryLabel} label="Fund category" onToggle={onToggleCategory} selected={categoryFilter} />
                   ) : null}
                 </div>
@@ -445,13 +428,14 @@ function HoldingsRow({
                 aria-selected={index === highlight}
                 className={index === highlight ? "highlighted" : ""}
                 id={optionId(index)}
-                key={item.proj_id}
+                key={`${item.proj_id}-${item.fund_class_name}`}
                 onMouseDown={(event) => { event.preventDefault(); onSelect(item); setOpen(false); }}
                 role="option"
                 type="button"
               >
-                {fundDisplayName(item)}
-                <span className="fid">{item.proj_id}</span>
+                {item.display_name}
+                <span className="fid">{item.proj_id} &middot; {item.fund_class_name}</span>
+                {formatCoverage(item) ? <span className="coverage">{formatCoverage(item)}</span> : null}
               </button>
             ))}
             {!options.length ? <button disabled type="button">No matching funds</button> : null}
@@ -562,8 +546,7 @@ function AllocationDonut({
     const color = PALETTE[index % PALETTE.length];
     const d = `M${cx},${cy} L${x1.toFixed(2)},${y1.toFixed(2)} A${r},${r} 0 ${large} 1 ${x2.toFixed(2)},${y2.toFixed(2)} Z`;
     angle = endAngle;
-    const fund = fundsById.get(row.projId);
-    return { d, color, startAngle, endAngle, key: row.key, label: fund ? fundDisplayName(fund) : row.projId, weight: row.weight };
+    return { d, color, startAngle, endAngle, key: row.key, label: fundsById.get(row.projId)?.display_name ?? row.projId, weight: row.weight };
   });
 
   // A boundary sits between arc[i] and arc[(i+1)%n] -- dragging it moves

@@ -3,6 +3,8 @@ data/raw/*
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
+data/runs/*
+!data/runs/.gitkeep
 # Committed SEC Open Data cache (mirrors ../Backtest Portfolio Webull:SEC
 # OPENAI's data/sec/ pattern of committing its NAV cache) -- the app reads
 # these directly at request time instead of calling the live SEC API,

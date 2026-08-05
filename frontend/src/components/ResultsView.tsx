@@ -1,9 +1,9 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { ShieldCheck } from "lucide-react";
+import { Download, ShieldCheck } from "lucide-react";
 import type { SimulateResponse } from "../types/simulate";
-import { AllocationPie, AxisCurve, Histogram, CorrelationMatrix, DataTable } from "./charts";
-import type { AllocationSlice, ChartSeries, HistogramBin, TableSection } from "./charts";
+import { AllocationPie, AxisCurve, Histogram, CorrelationMatrix, DataTable, Heatmap, PercentileRange, TargetProbabilityChart } from "./charts";
+import type { AllocationSlice, ChartSeries, HeatmapRow, HistogramBin, TableSection } from "./charts";
 
 type ResultsTab = "overview" | "growth" | "distribution" | "metrics" | "risk" | "goals" | "report";
 
@@ -21,12 +21,77 @@ const SIMULATION_MODEL_LABELS: Record<string, string> = {
 const PERCENTILE_KEYS = ["10", "25", "50", "75", "90"];
 const HORIZON_YEARS = ["1", "3", "5", "10", "15", "20", "25", "30"];
 
+interface RunConfigData {
+  simulation_model?: string;
+  simulation_period_years?: number;
+  initial_amount?: number;
+  tax_treatment?: string;
+  holdings?: { proj_id: string; weight: number }[];
+  n_paths?: number;
+  seed?: number;
+  rebalancing?: string;
+  inflation_model?: string;
+  inflation_mean?: number;
+  inflation_volatility?: number;
+  cashflow_mode?: string;
+  cashflow_amount?: number;
+  cashflow_inflation_adjusted?: boolean;
+  cashflow_frequency?: string;
+  bootstrap_model?: string;
+  block_years?: number;
+  time_series_model?: string;
+  distribution?: string;
+  degrees_of_freedom?: number;
+  expected_return?: number;
+  expected_volatility?: number;
+  sequence_of_returns_risk?: number;
+}
+
 function pctString(value: number, digits = 2) {
   return `${(value * 100).toFixed(digits)}%`;
 }
 
 function money(value: number) {
   return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
+}
+
+function percentError(successes: number, trials: number) {
+  if (!trials) return 0;
+  const p = Math.min(1, Math.max(0, successes / trials));
+  return 1.96 * Math.sqrt((p * (1 - p)) / trials);
+}
+
+function isCashflowRun(runConfig: RunConfigData) {
+  return !!runConfig.cashflow_mode && runConfig.cashflow_mode !== "none";
+}
+
+function zeroThresholdProbability(values: Record<string, number>) {
+  return values[">= 0.00%"] ?? values["0%"] ?? values[">= 0%"] ?? 0;
+}
+
+function MetricCard({
+  label,
+  value,
+  sub,
+  tone,
+  emphasis = false,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  tone?: "positive" | "negative";
+  emphasis?: boolean;
+}) {
+  const className = ["metricCard", emphasis ? "metricCard-emphasis" : "", tone ? `metricCard-${tone}` : ""]
+    .filter(Boolean)
+    .join(" ");
+  return (
+    <div className={className}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      {sub ? <small>{sub}</small> : null}
+    </div>
+  );
 }
 
 function downloadText(filename: string, content: string, type: string) {
@@ -69,6 +134,13 @@ export function ResultsView({ result }: Props) {
             {modelLabel} model{years ? ` · ${years}-year horizon` : ""}
           </h2>
         </div>
+        <button
+          className="secondaryButton"
+          onClick={() => downloadText(`${result.run_id || "result"}.json`, JSON.stringify(result, null, 2), "application/json")}
+          type="button"
+        >
+          <Download size={16} /> Result JSON
+        </button>
       </div>
 
       <nav className="resultTabs" aria-label="Simulation output tabs">
@@ -108,59 +180,93 @@ interface OverviewData {
 
 function OverviewTab({ result }: { result: SimulateResponse }) {
   const overview = result.overview as unknown as OverviewData;
+  const metrics = result.metrics as unknown as MetricsData;
+  const risk = result.risk as unknown as RiskData;
+  const runConfig = result.run_config as unknown as RunConfigData;
+  const cashflowRun = isCashflowRun(runConfig);
   const slices: AllocationSlice[] = overview.holdings.map((h) => ({
     key: h.proj_id,
     label: h.proj_id,
     weight: h.weight,
   }));
   const lowSurvival = overview.survival_rate < 0.5;
+  const p10 = metrics.percentile_table.ending_balance["10"];
+  const p90 = metrics.percentile_table.ending_balance["90"];
+  const samplingError = percentError(overview.survived_count, overview.n_paths);
+  const survivalLabel = cashflowRun ? "Withdrawal survival rate" : "Positive ending balance rate";
   return (
     <div className="tabStack">
-      <div>
-        <p>
-          {overview.survived_count} out of {overview.n_paths} simulated portfolios (
-          {(overview.survival_rate * 100).toFixed(2)}%) survived all withdrawals through the full simulation
-          horizon.
+      <section className="chartPanel">
+        <h3>Decision summary</h3>
+        <p className="summaryText">
+          {overview.survived_count.toLocaleString()} of {overview.n_paths.toLocaleString()} simulated paths (
+          {pctString(overview.survival_rate)}) {cashflowRun ? "funded the configured cashflows" : "ended with a positive balance"} through the full simulation horizon.
         </p>
         <div className="metricGrid">
-          <div className="metricCard">
-            <span>Median Ending Balance</span>
-            <strong>
-              {overview.median_ending_balance.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-            </strong>
-          </div>
-          <div className="metricCard">
-            <span>Median CAGR</span>
-            <strong>{(overview.median_cagr * 100).toFixed(2)}%</strong>
-          </div>
-          <div className={lowSurvival ? "metricCard metricCard-negative" : "metricCard metricCard-positive"}>
-            <span>Survival Rate</span>
-            <strong>{(overview.survival_rate * 100).toFixed(2)}%</strong>
-          </div>
-          <div className="metricCard">
-            <span>Simulated Paths</span>
-            <strong>{overview.n_paths.toLocaleString()}</strong>
-          </div>
+          <MetricCard label="Median Ending Balance" value={money(overview.median_ending_balance)} emphasis />
+          <MetricCard label="Median CAGR" value={pctString(overview.median_cagr)} />
+          <MetricCard label={survivalLabel} value={pctString(overview.survival_rate)} tone={lowSurvival ? "negative" : "positive"} />
+          <MetricCard label="Simulated Paths" value={overview.n_paths.toLocaleString()} sub={`Approx. sampling error ±${pctString(samplingError)}`} />
         </div>
-        {lowSurvival ? (
-          <div className="banner danger">
-            <span className="ic">&#9888;</span>
-            <div className="banner-body">
-              <p className="banner-message">
-                This plan has a high risk of running out of money before the end of the simulation period &mdash;
-                consider adjusting your withdrawal amount, initial portfolio, or asset allocation.
-              </p>
-            </div>
-          </div>
-        ) : null}
+      </section>
+      <div className="panelGrid">
+        <DataTable
+          section={{
+            title: "Run snapshot",
+            columns: ["assumption", "value"],
+            rows: [
+              ["Simulation model", SIMULATION_MODEL_LABELS[runConfig.simulation_model ?? ""] ?? "Monte Carlo"],
+              ["Horizon", `${runConfig.simulation_period_years ?? "—"} years`],
+              ["Initial amount", money(runConfig.initial_amount ?? 0)],
+              ["Inflation", humanizeLabel(runConfig.inflation_model ?? "not specified")],
+              ["Cashflow", cashflowRun ? `${humanizeLabel(runConfig.cashflow_mode ?? "")} · ${humanizeLabel(runConfig.cashflow_frequency ?? "")}` : "None"],
+              ["Rebalancing", humanizeLabel(runConfig.rebalancing ?? "not specified")],
+            ],
+          }}
+        />
+        <DataTable
+          section={{
+            title: "Result checklist",
+            columns: ["question", "result", "evidence"],
+            rows: [
+              [survivalLabel, pctString(overview.survival_rate), "Overview / Growth"],
+              ["Lower-tail ending balance (P10)", money(p10), p10 > 0 ? "Positive lower-tail outcome" : "Lower-tail depletion"],
+              ["Median to upper-tail spread (P90 − P10)", money(p90 - p10), "Distribution"],
+              ["Terminal loss VaR / ES (90%)", `${money(risk.value_at_risk)} / ${money(risk.expected_shortfall)}`, "Risk & Correlation"],
+              ["Estimated Monte Carlo sampling error", `±${pctString(samplingError)}`, `${overview.n_paths.toLocaleString()} paths`],
+            ],
+          }}
+        />
       </div>
+      <DataTable
+        section={{
+          title: "Terminal outcomes",
+          columns: ["scenario", "nominal ending balance", "real ending balance", "reading"],
+          rows: PERCENTILE_KEYS.map((p) => [
+            `P${p}`,
+            money(metrics.percentile_table.ending_balance[p]),
+            money(metrics.percentile_table.ending_balance_real[p]),
+            p === "10" ? "Downside case" : p === "50" ? "Middle simulated outcome" : p === "90" ? "Upper-tail outcome" : "Distribution range",
+          ]),
+        }}
+      />
+      <PercentileRange
+        title="Terminal balance range"
+        markers={[
+          { label: "Initial", value: runConfig.initial_amount ?? 0, color: "var(--text-tertiary)" },
+          { label: "P10", value: p10, color: "var(--danger)" },
+          { label: "P50", value: metrics.percentile_table.ending_balance["50"], color: "var(--accent)" },
+          { label: "P90", value: p90, color: "var(--success)" },
+        ]}
+        valueFormat={money}
+      />
       <section className="chartPanel">
         <h3>Portfolio Allocation</h3>
         <AllocationPie slices={slices} />
       </section>
-      <div className="tables">
-        <div>
-          <h3>Portfolio Holdings</h3>
+      <section className="tablePanel">
+        <h3>Portfolio Holdings</h3>
+        <div className="tableScroller">
           <table>
             <thead>
               <tr>
@@ -178,7 +284,7 @@ function OverviewTab({ result }: { result: SimulateResponse }) {
             </tbody>
           </table>
         </div>
-      </div>
+      </section>
     </div>
   );
 }
@@ -188,6 +294,42 @@ function OverviewTab({ result }: { result: SimulateResponse }) {
 interface GrowthData {
   fan_chart: Record<string, number[]>;
   survival_over_time: number[];
+}
+
+function growthMilestoneSection(growth: GrowthData): TableSection {
+  const horizon = Math.max(0, (growth.fan_chart["50"]?.length ?? 1) - 1);
+  const milestones = Array.from(new Set([1, 5, 10, 20, horizon].filter((year) => year > 0 && year <= horizon)));
+  return {
+    title: "Projected value milestones",
+    columns: ["year", "P10 ending balance", "P50 ending balance", "P90 ending balance", "survival"],
+    rows: milestones.map((year) => [
+      `Year ${year}`,
+      growth.fan_chart["10"]?.[year] == null ? "N/A" : money(growth.fan_chart["10"][year]),
+      growth.fan_chart["50"]?.[year] == null ? "N/A" : money(growth.fan_chart["50"][year]),
+      growth.fan_chart["90"]?.[year] == null ? "N/A" : money(growth.fan_chart["90"][year]),
+      growth.survival_over_time[year] == null ? "N/A" : pctString(growth.survival_over_time[year]),
+    ]),
+  };
+}
+
+function survivalYAxisDomain(values: number[]): [number, number] {
+  const finiteValues = values.filter((value) => Number.isFinite(value)).map((value) => value * 100);
+  if (!finiteValues.length) return [0, 100];
+  const dataMin = Math.max(0, Math.min(...finiteValues));
+  const dataMax = Math.min(100, Math.max(...finiteValues));
+  const spread = dataMax - dataMin;
+
+  // A flat 100% line is a valid result, not a 99–100% trend. Keep the full
+  // probability scale in that boundary case so the chart does not imply
+  // precision that the simulation did not produce.
+  if (dataMin >= 99.999 && dataMax >= 99.999) return [0, 100];
+  if (spread < 0.001) {
+    const padding = Math.max(0.5, dataMax * 0.01);
+    return [Math.max(0, dataMin - padding), Math.min(100, dataMax + padding)];
+  }
+
+  const padding = Math.max(0.25, spread * 0.12);
+  return [Math.max(0, dataMin - padding), Math.min(100, dataMax + padding)];
 }
 
 function GrowthTab({ result }: { result: SimulateResponse }) {
@@ -211,20 +353,50 @@ function GrowthTab({ result }: { result: SimulateResponse }) {
       points: growth.survival_over_time.map((y, x) => ({ x, y: y * 100 })),
     },
   ];
+  const horizon = Math.max(0, (growth.fan_chart["50"]?.length ?? 1) - 1);
+  const terminalValue = (percentile: string) => {
+    const values = growth.fan_chart[percentile] ?? [];
+    return values[horizon] ?? values[values.length - 1] ?? 0;
+  };
+  const survivalValues = growth.survival_over_time.filter((value) => Number.isFinite(value));
+  const survivalLatest = survivalValues[survivalValues.length - 1] ?? 0;
+  const survivalMin = survivalValues.length ? Math.min(...survivalValues) : 0;
+  const survivalDomain = survivalYAxisDomain(growth.survival_over_time);
   return (
-    <div className="panelGrid">
-      <AxisCurve
-        title="Simulated Portfolio Balances"
-        series={fanSeries}
-        valueFormat={(v) => v.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-        xFormat={(v) => `Yr ${v}`}
-      />
-      <AxisCurve
-        title="Portfolio Survival Over Time"
-        series={survivalSeries}
-        valueFormat={(v) => `${v.toFixed(1)}%`}
-        xFormat={(v) => `Yr ${v}`}
-      />
+    <div className="tabStack">
+      <div className="growthLayout">
+        <AxisCurve
+          className="growthFanChart"
+          title="Simulated Portfolio Balances"
+          series={fanSeries}
+          valueFormat={(v) => v.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+          xFormat={(v) => `Yr ${v}`}
+          badgeText={`P50 · ${money(terminalValue("50"))}`}
+          stats={[
+            { label: `P10 at Yr ${horizon}`, value: money(terminalValue("10")) },
+            { label: `P50 at Yr ${horizon}`, value: money(terminalValue("50")) },
+            { label: `P90 at Yr ${horizon}`, value: money(terminalValue("90")) },
+          ]}
+        />
+        <div className="growthSupportGrid">
+          <AxisCurve
+            className="growthSurvivalChart"
+            title="Portfolio Survival Over Time"
+            series={survivalSeries}
+            valueFormat={(v) => `${v.toFixed(1)}%`}
+            xFormat={(v) => `Yr ${v}`}
+            yDomain={survivalDomain}
+            badgeText={`Yr ${horizon} · ${pctString(survivalLatest)}`}
+            stats={[
+              { label: "Start", value: pctString(survivalValues[0] ?? 0) },
+              { label: "Lowest", value: pctString(survivalMin) },
+              { label: "Latest", value: pctString(survivalLatest) },
+            ]}
+          />
+          <DataTable section={growthMilestoneSection(growth)} />
+        </div>
+      </div>
+      <p className="footnote">The fan chart shows the distribution of simulated balances; survival is the share of paths still above zero at each year.</p>
     </div>
   );
 }
@@ -238,39 +410,73 @@ interface DistributionData {
 
 function DistributionTab({ result }: { result: SimulateResponse }) {
   const distribution = result.distribution as unknown as DistributionData;
-  const runConfig = result.run_config as unknown as { initial_amount?: number };
-  const initial = runConfig.initial_amount || 1;
-  // Histogram's x-axis label (charts.tsx) always formats `row.from` as a
-  // percentage — that's fine for fraction-scale data (drawdown) but was the
-  // real cause of the overflow for ending balances: dollar-scale `from`
-  // values (hundreds of thousands to tens of millions) ran through percent
-  // formatting produced labels like "735,345.61%" — dozens of characters
-  // wide, wider than any bin count could keep readable. Converting ending
-  // balance to total return (ending / initial - 1) puts `from` back on the
-  // same small-fraction scale the component's built-in label formatter
-  // expects, producing short labels like "175.3%".
-  const endingReturns = distribution.ending_balance_histogram.map((v) => v / initial - 1);
-  // 20 bins keeps the rotated axis labels (9.5px, -40deg, white-space: nowrap)
-  // readable at typical card widths without overlapping their neighbors —
-  // 30 was too dense and bled labels off the card's right edge.
-  const bins = buildHistogramBins(endingReturns, 20, (v) => pctString(v, 1));
+  const overview = result.overview as unknown as OverviewData;
+  const metrics = result.metrics as unknown as MetricsData;
+  const risk = result.risk as unknown as RiskData;
+  const runConfig = result.run_config as unknown as RunConfigData;
+  // Keep ending balances in their native currency unit. The histogram
+  // primitive accepts an axis formatter, so dollars are not accidentally
+  // rendered as percentages (or transformed into an unexplained total return).
+  const bins = buildHistogramBins(distribution.ending_balance_histogram, 10, money);
   const drawdownBins = distribution.max_drawdown_histogram
-    ? buildHistogramBins(distribution.max_drawdown_histogram, 20, (v) => pctString(v, 1))
+    ? buildHistogramBins(distribution.max_drawdown_histogram, 10, (v) => pctString(v, 1))
     : [];
+  const p10 = metrics.percentile_table.ending_balance["10"];
+  const p90 = metrics.percentile_table.ending_balance["90"];
+  const terminalLossProbability = zeroThresholdProbability(risk.loss_probability.including_cashflows.end_of_period);
+  const defaultTarget = (runConfig.initial_amount ?? 0) > 0 ? runConfig.initial_amount ?? 0 : metrics.percentile_table.ending_balance["50"];
+  const [endingTarget, setEndingTarget] = useState(defaultTarget);
   return (
-    <div className="panelGrid">
-      <section className="chartPanel">
-        <h3>Ending Balance Distribution</h3>
-        <p>Distribution of the simulated portfolio's total return (ending balance vs. initial amount) across all paths.</p>
-        <Histogram rows={bins} />
-      </section>
-      {drawdownBins.length ? (
+    <div className="tabStack">
+      <div className="metricGrid">
+        <MetricCard label="Probability of depletion" value={pctString(1 - overview.survival_rate)} tone={overview.survival_rate < 0.5 ? "negative" : undefined} sub="Full-horizon terminal outcome" />
+        <MetricCard label="P10 ending balance" value={money(p10)} sub="Downside case" />
+        <MetricCard label="P90 − P10 spread" value={money(p90 - p10)} sub="Terminal outcome dispersion" />
+        <MetricCard label="Terminal loss probability" value={pctString(terminalLossProbability)} sub="Ending balance below initial amount" />
+      </div>
+      <div className="panelGrid">
         <section className="chartPanel">
-          <h3>Max Drawdown Distribution</h3>
-          <p>Distribution of each simulated path's worst peak-to-trough drawdown.</p>
-          <Histogram rows={drawdownBins} />
+          <h3>Ending balance distribution</h3>
+          <p>Simulated ending balances across all paths, shown in the portfolio currency.</p>
+          <Histogram rows={bins} showGainLossLegend={false} valueFormat={money} />
         </section>
+        {drawdownBins.length ? (
+          <section className="chartPanel">
+            <h3>Max drawdown distribution</h3>
+            <p>Worst peak-to-trough loss for each simulated path.</p>
+            <Histogram rows={drawdownBins} showGainLossLegend={false} valueFormat={(value) => pctString(value, 1)} />
+          </section>
+        ) : null}
+      </div>
+      {distribution.ending_balance_histogram.length ? (
+        <TargetProbabilityChart
+          title="Probability of Ending Below Target"
+          values={distribution.ending_balance_histogram}
+          target={endingTarget}
+          onTargetChange={setEndingTarget}
+          targetPresets={[
+            { label: "Initial", value: runConfig.initial_amount ?? 0 },
+            { label: "P10", value: p10 },
+            { label: "P50", value: metrics.percentile_table.ending_balance["50"] },
+            { label: "P90", value: p90 },
+          ]}
+          xFormat={money}
+        />
       ) : null}
+      <DataTable
+        section={{
+          title: "Terminal outcome markers",
+          columns: ["marker", "value", "interpretation"],
+          rows: [
+            ["Initial amount", money((result.run_config as unknown as RunConfigData).initial_amount ?? 0), "Reference capital"],
+            ["P10", money(p10), "10% of paths ended at or below this balance"],
+            ["P50", money(metrics.percentile_table.ending_balance["50"]), "Median simulated outcome"],
+            ["P90", money(p90), "90% of paths ended at or below this balance"],
+            ["Terminal loss VaR (90%)", money(risk.value_at_risk), "Loss relative to initial amount"],
+            ["Expected shortfall (90%)", money(risk.expected_shortfall), "Average loss beyond the VaR cutoff"],
+          ],
+        }}
+      />
     </div>
   );
 }
@@ -284,14 +490,8 @@ function buildHistogramBins(
   const min = Math.min(...values);
   const max = Math.max(...values);
   const width = (max - min) / nBins || 1;
-  // Bin labels double as React keys in Histogram (key={row.bin}), so they
-  // must stay unique even when the raw values are close together (e.g. a
-  // fractional drawdown range like -0.65..-0.02 would collapse to a
-  // handful of duplicate "0"/"-1" strings under whole-number formatting) —
-  // the bin index is appended to guarantee uniqueness regardless of the
-  // caller's formatter/value scale.
   const bins: HistogramBin[] = Array.from({ length: nBins }, (_, i) => ({
-    bin: `${formatBinLabel(min + i * width)}#${i}`,
+    bin: formatBinLabel(min + i * width),
     count: 0,
     from: min + i * width,
     to: min + (i + 1) * width,
@@ -330,12 +530,7 @@ function metricsSection(metrics: MetricsData): TableSection {
   const columns = ["metric", ...pcts.map((p) => `${p}th Percentile`)];
   const pt = metrics.percentile_table;
   return {
-    // Empty on purpose: every call site already renders its own heading
-    // ("Metrics" / "4. Performance results") immediately before this
-    // table, so DataTable's internal <h3>{title}</h3> would duplicate it.
-    // The accessible name is passed separately via each call site's
-    // `caption` prop instead.
-    title: "",
+    title: "Performance Summary",
     columns,
     rows: [
       ["TWRR (nominal)", ...pcts.map((p) => pctString(pt.twrr_nominal[p]))],
@@ -355,13 +550,58 @@ function metricsSection(metrics: MetricsData): TableSection {
   };
 }
 
+function groupedMetricsSection(
+  metrics: MetricsData,
+  title: string,
+  rows: [string, (percentile: string) => string][]
+): TableSection {
+  return {
+    title,
+    columns: ["metric", ...PERCENTILE_KEYS.map((p) => `P${p}`)],
+    rows: rows.map(([label, formatter]) => [label, ...PERCENTILE_KEYS.map(formatter)]),
+  };
+}
+
 function MetricsTab({ result }: { result: SimulateResponse }) {
   const metrics = result.metrics as unknown as MetricsData;
+  const pt = metrics.percentile_table;
   return (
-    <section className="chartPanel">
-      <h3>Performance Summary</h3>
-      <DataTable caption="Performance Summary" section={metricsSection(metrics)} />
-    </section>
+    <div className="tabStack">
+      <div className="metricGrid">
+        <MetricCard label="Median CAGR" value={pctString(pt.cagr["50"])} />
+        <MetricCard label="P10 ending balance" value={money(pt.ending_balance["10"])} sub="Downside case" />
+        <MetricCard label="Median real balance" value={money(pt.ending_balance_real["50"])} sub="Inflation-adjusted" />
+        <MetricCard label="Median max drawdown" value={pctString(pt.max_drawdown["50"])} tone="negative" sub="Typical path-level peak-to-trough loss" />
+      </div>
+      <div className="panelGrid">
+        <DataTable
+          section={groupedMetricsSection(metrics, "Performance outcomes", [
+            ["TWRR (nominal)", (p) => pctString(pt.twrr_nominal[p])],
+            ["TWRR (real)", (p) => pctString(pt.twrr_real[p])],
+            ["CAGR", (p) => pctString(pt.cagr[p])],
+            ["Ending Balance", (p) => money(pt.ending_balance[p])],
+            ["Ending Balance (real)", (p) => money(pt.ending_balance_real[p])],
+          ])}
+        />
+        <DataTable
+          section={groupedMetricsSection(metrics, "Risk-adjusted outcomes", [
+            ["Annual Mean Return", (p) => pctString(pt.annual_mean_return[p])],
+            ["Annualized Volatility", (p) => pctString(pt.annualized_volatility[p])],
+            ["Max Drawdown", (p) => pctString(pt.max_drawdown[p])],
+            ["Max Drawdown (excl. cashflows)", (p) => pctString(pt.max_drawdown_excl_cashflows[p])],
+            ["Sharpe Ratio", (p) => metrics.sharpe[p].toFixed(2)],
+            ["Sortino Ratio", (p) => metrics.sortino[p].toFixed(2)],
+          ])}
+        />
+      </div>
+      <DataTable
+        section={groupedMetricsSection(metrics, "Withdrawal capacity", [
+          ["Safe Withdrawal Rate", (p) => pctString(metrics.safe_withdrawal_rate[p])],
+          ["Perpetual Withdrawal Rate", (p) => pctString(metrics.perpetual_withdrawal_rate[p])],
+        ])}
+      />
+      <p className="footnote">Each percentile describes the distribution across simulated paths. Withdrawal rates should be read with the run horizon, cashflow rule and desired success threshold.</p>
+    </div>
   );
 }
 
@@ -384,22 +624,23 @@ interface RiskData {
 
 function expectedReturnByHorizonSection(data: Record<string, Record<string, number>>): TableSection {
   return {
-    // Empty on purpose — see metricsSection's comment: RiskTab already
-    // renders an <h3> immediately before this table.
-    title: "",
+    title: "Table — Expected Annual Return by Horizon",
     columns: ["percentile", ...HORIZON_YEARS.map((h) => `${h}yr`)],
-    rows: PERCENTILE_KEYS.map((p) => [`${p}th`, ...HORIZON_YEARS.map((h) => pctString(data[h]?.[p] ?? 0))]),
+    rows: PERCENTILE_KEYS.map((p) => [
+      `${p}th`,
+      ...HORIZON_YEARS.map((h) => data[h]?.[p] == null ? "N/A" : pctString(data[h][p])),
+    ]),
   };
 }
 
 function annualReturnProbabilitySection(data: Record<string, Record<string, number>>): TableSection {
   const thresholdLabels = Object.keys(data);
   return {
-    title: "",
+    title: "Table — Annual Return Probability",
     columns: ["threshold", ...HORIZON_YEARS.map((h) => `${h}yr`)],
     rows: thresholdLabels.map((label) => [
       `>= ${label}`,
-      ...HORIZON_YEARS.map((h) => pctString(data[label]?.[h] ?? 0)),
+      ...HORIZON_YEARS.map((h) => data[label]?.[h] == null ? "N/A" : pctString(data[label][h])),
     ]),
   };
 }
@@ -407,7 +648,7 @@ function annualReturnProbabilitySection(data: Record<string, Record<string, numb
 function lossProbabilitySection(data: RiskData["loss_probability"]): TableSection {
   const thresholdLabels = Object.keys(data.excluding_cashflows.within_period);
   return {
-    title: "",
+    title: "Table — Loss Probability",
     columns: [
       "threshold",
       "Excl. Cashflows — Within",
@@ -425,13 +666,67 @@ function lossProbabilitySection(data: RiskData["loss_probability"]): TableSectio
   };
 }
 
+function expectedReturnHeatmapRows(data: Record<string, Record<string, number>>): HeatmapRow[] {
+  return PERCENTILE_KEYS.map((p) => ({
+    label: `P${p}`,
+    values: HORIZON_YEARS.map((h) => data[h]?.[p] ?? null),
+  }));
+}
+
+function annualReturnProbabilityHeatmapRows(data: Record<string, Record<string, number>>): HeatmapRow[] {
+  return Object.keys(data).map((threshold) => ({
+    label: threshold.startsWith(">=") ? threshold.replace(">=", "≥") : `≥ ${threshold}`,
+    values: HORIZON_YEARS.map((h) => data[threshold]?.[h] ?? null),
+  }));
+}
+
+function lossProbabilityHeatmapRows(data: RiskData["loss_probability"]): HeatmapRow[] {
+  const thresholds = Object.keys(data.excluding_cashflows.within_period);
+  return thresholds.map((threshold) => ({
+    label: threshold.startsWith(">=") ? threshold.replace(">=", "≥") : `≥ ${threshold}`,
+    values: [
+      data.excluding_cashflows.within_period[threshold] ?? null,
+      data.excluding_cashflows.end_of_period[threshold] ?? null,
+      data.including_cashflows.within_period[threshold] ?? null,
+      data.including_cashflows.end_of_period[threshold] ?? null,
+    ],
+  }));
+}
+
+function riskContributionSection(
+  risk: RiskData,
+  holdings: { proj_id: string; weight: number }[]
+): TableSection {
+  const ids = Object.keys(risk.correlation_and_returns.correlation);
+  const weights = ids.map((id) => (holdings.find((holding) => holding.proj_id === id)?.weight ?? 0) / 100);
+  const volatilities = ids.map((id) => risk.correlation_and_returns.stats[id]?.volatility ?? 0);
+  const covariance = ids.map((rowId, rowIndex) => ids.map((columnId, columnIndex) => {
+    const correlation = risk.correlation_and_returns.correlation[rowId]?.[columnId] ?? (rowIndex === columnIndex ? 1 : 0);
+    return volatilities[rowIndex] * volatilities[columnIndex] * correlation;
+  }));
+  const sigmaWeight = ids.map((_, rowIndex) => covariance[rowIndex].reduce((sum, value, columnIndex) => sum + value * weights[columnIndex], 0));
+  const portfolioVariance = weights.reduce((sum, weight, index) => sum + weight * sigmaWeight[index], 0);
+  const portfolioVolatility = Math.sqrt(Math.max(0, portfolioVariance));
+  if (!ids.length || portfolioVolatility === 0) {
+    return { title: "Risk contribution by holding", columns: ["holding", "risk contribution"], rows: [] };
+  }
+  return {
+    title: "Risk contribution by holding",
+    columns: ["holding", "historical volatility", "share of portfolio risk"],
+    rows: ids.map((id, index) => {
+      const component = (weights[index] * sigmaWeight[index]) / portfolioVolatility;
+      return [id, pctString(volatilities[index]), pctString(component / portfolioVolatility)];
+    }),
+  };
+}
+
 function RiskTab({ result }: { result: SimulateResponse }) {
   const risk = result.risk as unknown as RiskData;
+  const overview = result.overview as unknown as OverviewData;
+  const runConfig = result.run_config as unknown as RunConfigData;
   const ids = Object.keys(risk.correlation_and_returns.correlation);
   const statsSection: TableSection = {
-    // Empty on purpose — RiskTab already renders an <h3> immediately
-    // before this table.
-    title: "",
+    title: "Per-Holding Statistics",
     columns: ["holding", "cagr", "expected_return", "volatility"],
     rows: ids.map((id) => {
       const s = risk.correlation_and_returns.stats[id];
@@ -441,49 +736,57 @@ function RiskTab({ result }: { result: SimulateResponse }) {
   return (
     <div className="tabStack">
       <div className="metricGrid">
-        <div className="metricCard">
-          <span>Value at Risk (90%)</span>
-          <strong>{risk.value_at_risk.toLocaleString(undefined, { maximumFractionDigits: 0 })}</strong>
-        </div>
-        <div className="metricCard">
-          <span>Expected Shortfall (90%)</span>
-          <strong>{risk.expected_shortfall.toLocaleString(undefined, { maximumFractionDigits: 0 })}</strong>
-        </div>
+        <MetricCard label="Terminal loss VaR (90%)" value={money(risk.value_at_risk)} sub="Loss relative to initial amount" />
+        <MetricCard label="Terminal expected shortfall (90%)" value={money(risk.expected_shortfall)} sub="Average loss beyond VaR" />
+        <MetricCard label="Terminal depletion" value={pctString(1 - overview.survival_rate)} tone={overview.survival_rate < 0.5 ? "negative" : undefined} />
+        <MetricCard label="P90 max drawdown" value={pctString((result.metrics as unknown as MetricsData).percentile_table.max_drawdown["90"])} sub="Less severe end of drawdown distribution" />
       </div>
-      <div className="tables">
-        <div>
+      <div className="panelGrid">
+        <section className="tablePanel">
           <h3>Correlation Matrix</h3>
+          <p className="summaryText">Pairwise holding correlation; stronger positive clusters provide less diversification benefit.</p>
           <CorrelationMatrix ids={ids} correlation={risk.correlation_and_returns.correlation} />
-        </div>
-        <div>
-          <h3>Per-Holding Statistics</h3>
-          <DataTable caption="Per-Holding Statistics" section={statsSection} />
-        </div>
+        </section>
+        <DataTable section={statsSection} />
       </div>
-      {risk.expected_return_by_horizon ? (
-        <section className="chartPanel">
-          <h3>Expected Annual Return by Horizon</h3>
-          <DataTable
-            caption="Expected Annual Return by Horizon"
-            section={expectedReturnByHorizonSection(risk.expected_return_by_horizon)}
+      <DataTable section={riskContributionSection(risk, overview.holdings)} />
+      <p className="footnote">Per-holding statistics and risk contribution use the selected holdings' observed return history; they are diagnostics for diversification, not additional simulated paths.</p>
+      <div className="panelGrid riskHeatmapGrid">
+        {risk.expected_return_by_horizon ? (
+          <Heatmap
+            title="Expected annual return by horizon"
+            columns={HORIZON_YEARS.map((h) => `${h}yr`)}
+            rows={expectedReturnHeatmapRows(risk.expected_return_by_horizon)}
+            valueFormat={pctString}
+            diverging
+            description="N/A means the selected horizon is longer than this run's simulation period."
           />
-        </section>
-      ) : null}
-      {risk.annual_return_probability ? (
-        <section className="chartPanel">
-          <h3>Annual Return Probability</h3>
-          <DataTable
-            caption="Annual Return Probability"
-            section={annualReturnProbabilitySection(risk.annual_return_probability)}
+        ) : null}
+        {risk.annual_return_probability ? (
+          <Heatmap
+            title="Probability of reaching annual return threshold"
+            columns={HORIZON_YEARS.map((h) => `${h}yr`)}
+            rows={annualReturnProbabilityHeatmapRows(risk.annual_return_probability)}
+            valueFormat={pctString}
+            description="Probability that annualized return meets or exceeds the row threshold."
           />
-        </section>
-      ) : null}
+        ) : null}
+      </div>
       {risk.loss_probability ? (
-        <section className="chartPanel">
-          <h3>Loss Probability</h3>
-          <DataTable caption="Loss Probability" section={lossProbabilitySection(risk.loss_probability)} />
-        </section>
+        <Heatmap
+          title="Loss probability"
+          columns={["Excl. cashflows · within", "Excl. cashflows · end", "Incl. cashflows · within", "Incl. cashflows · end"]}
+          rows={lossProbabilityHeatmapRows(risk.loss_probability)}
+          valueFormat={pctString}
+          description="Within-period loss captures whether a path ever crossed the drawdown threshold; end-of-period uses the terminal balance."
+        />
       ) : null}
+      <div className="tableDetailsGroup">
+        {risk.expected_return_by_horizon ? <DataTable section={expectedReturnByHorizonSection(risk.expected_return_by_horizon)} /> : null}
+        {risk.annual_return_probability ? <DataTable section={annualReturnProbabilitySection(risk.annual_return_probability)} /> : null}
+        {risk.loss_probability ? <DataTable section={lossProbabilitySection(risk.loss_probability)} /> : null}
+      </div>
+      <p className="footnote">Model: {SIMULATION_MODEL_LABELS[runConfig.simulation_model ?? ""] ?? "Monte Carlo"}. VaR and expected shortfall here describe terminal loss relative to the initial amount, not a one-period worst-case loss.</p>
     </div>
   );
 }
@@ -538,9 +841,9 @@ function GoalsTab({ goals }: { goals: Record<string, unknown> }) {
       {summary.length === 0 ? (
         <p>No goals were configured for this simulation.</p>
       ) : (
-        <div className="tables">
-          <div>
-            <h3>Goal Success Rates</h3>
+        <section className="tablePanel">
+          <h3>Goal Success Rates</h3>
+          <div className="tableScroller">
             <table>
               <thead>
                 <tr>
@@ -558,44 +861,35 @@ function GoalsTab({ goals }: { goals: Record<string, unknown> }) {
               </tbody>
             </table>
           </div>
-        </div>
+        </section>
       )}
       {hasCashflows ? (
-        <section className="chartPanel">
-          <h3>Simulated Cashflows</h3>
-          <AxisCurve
-            title="Annual Cashflow (nominal vs. present dollar)"
-            series={cashflowSeries}
-            valueFormat={(v) => v.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-            xFormat={(v) => `Yr ${v}`}
-          />
-        </section>
+        <AxisCurve
+          title="Annual Cashflow (nominal vs. present dollar)"
+          series={cashflowSeries}
+          valueFormat={(v) => v.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+          xFormat={(v) => `Yr ${v}`}
+        />
       ) : null}
       {glidePathSeries.length ? (
-        <section className="chartPanel">
-          <h3>Glide Path</h3>
-          <p>Target allocation transition from the working-years portfolio to the retirement portfolio.</p>
+        <>
+          <div className="notePanel">
+            <h3>Glide Path</h3>
+            <p>Target allocation transition from the working-years portfolio to the retirement portfolio.</p>
+          </div>
           <AxisCurve
             title="Allocation by Holding Over Time"
             series={glidePathSeries}
             valueFormat={(v) => `${v.toFixed(1)}%`}
             xFormat={(v) => `Yr ${v}`}
           />
-        </section>
+        </>
       ) : null}
     </div>
   );
 }
 
 // --- Report ---------------------------------------------------------
-
-interface RunConfigData {
-  simulation_model?: string;
-  simulation_period_years?: number;
-  initial_amount?: number;
-  tax_treatment?: string;
-  holdings?: { proj_id: string; weight: number }[];
-}
 
 function simulationMethodology(model: string | undefined) {
   switch (model) {
@@ -624,8 +918,17 @@ function portfolioSpecRows(runConfig: RunConfigData): TableSection {
     rows: [
       ["Initial Amount", money(runConfig.initial_amount ?? 0)],
       ["Simulation Period (years)", String(runConfig.simulation_period_years ?? "")],
+      ["Simulation Paths", String(runConfig.n_paths ?? "")],
+      ["Seed", runConfig.seed == null ? "Random" : String(runConfig.seed)],
       ["Tax Treatment", humanizeLabel(runConfig.tax_treatment ?? "")],
       ["Simulation Model", SIMULATION_MODEL_LABELS[runConfig.simulation_model ?? ""] ?? runConfig.simulation_model ?? ""],
+      ["Inflation Model", humanizeLabel(runConfig.inflation_model ?? "")],
+      ["Cashflow Mode", humanizeLabel(runConfig.cashflow_mode ?? "none")],
+      ["Cashflow Frequency", humanizeLabel(runConfig.cashflow_frequency ?? "")],
+      ["Rebalancing", humanizeLabel(runConfig.rebalancing ?? "")],
+      ...(runConfig.expected_return == null ? [] : [["Expected Return", pctString(runConfig.expected_return)]]),
+      ...(runConfig.expected_volatility == null ? [] : [["Expected Volatility", pctString(runConfig.expected_volatility)]]),
+      ...(runConfig.distribution == null ? [] : [["Return Distribution", humanizeLabel(runConfig.distribution)]]),
       ...(runConfig.holdings ?? []).map((h) => [`Holding: ${h.proj_id}`, `${h.weight.toFixed(1)}%`]),
     ],
   };
@@ -644,8 +947,23 @@ function riskSummaryRows(metrics: MetricsData, risk: RiskData): TableSection {
       ["Sharpe Ratio", metrics.sharpe["50"].toFixed(2)],
       ["Sortino Ratio", metrics.sortino["50"].toFixed(2)],
       ["Max Drawdown", pctString(pt.max_drawdown["50"])],
-      ["Value at Risk (90%)", money(risk.value_at_risk)],
-      ["Expected Shortfall (90%)", money(risk.expected_shortfall)],
+      ["Terminal Loss VaR (90%)", money(risk.value_at_risk)],
+      ["Terminal Expected Shortfall (90%)", money(risk.expected_shortfall)],
+    ],
+  };
+}
+
+function simulationDiagnosticsRows(overview: OverviewData, runConfig: RunConfigData): TableSection {
+  return {
+    title: "Simulation diagnostics",
+    columns: ["diagnostic", "value"],
+    rows: [
+      ["Simulated paths", overview.n_paths.toLocaleString()],
+      ["Full-horizon positive paths", `${overview.survived_count.toLocaleString()} (${pctString(overview.survival_rate)})`],
+      ["Approximate 95% sampling error", `±${pctString(percentError(overview.survived_count, overview.n_paths))}`],
+      ["Simulation horizon", `${runConfig.simulation_period_years ?? "—"} years`],
+      ["Random seed", runConfig.seed == null ? "Random" : String(runConfig.seed)],
+      ["Tail metric definition", "Terminal loss relative to initial amount; ES averages losses beyond the 90th-percentile cutoff"],
     ],
   };
 }
@@ -686,13 +1004,14 @@ function reportMarkdown(result: SimulateResponse) {
     { title: "5. Risk analysis", body: markdownTable(riskSummaryRows(metrics, risk)) },
     {
       title: "6. Distribution analysis",
-      body: `${overview.survived_count} of ${overview.n_paths} simulated paths (${pctString(overview.survival_rate)}) survived through the full horizon. The ending balance spread runs from ${money(metrics.percentile_table.ending_balance["10"])} at the 10th percentile to ${money(metrics.percentile_table.ending_balance["90"])} at the 90th percentile.`,
+      body: `${overview.survived_count} of ${overview.n_paths} simulated paths (${pctString(overview.survival_rate)}) remained positive through the full horizon. The ending balance spread runs from ${money(metrics.percentile_table.ending_balance["10"])} at the 10th percentile to ${money(metrics.percentile_table.ending_balance["90"])} at the 90th percentile.`,
     },
     { title: "7. Diversification and correlation", body: `Correlation was computed across ${ids.length} holding(s): ${ids.join(", ")}. See the Risk & Correlation tab for the full pairwise matrix.` },
+    { title: "8. Simulation diagnostics", body: markdownTable(simulationDiagnosticsRows(overview, runConfig)) },
     { title: "Formula reference", body: markdownTable(FORMULA_ROWS) },
     {
       title: "Limitations",
-      body: "Monte Carlo simulation only — not a forecast or investment advice. Based on historical parameter estimates (or user-specified parameters for the Parameterized model); past correlations and volatility may not hold in the future. Does not account for taxes or fees beyond what was explicitly configured.",
+      body: "Monte Carlo simulation only — not a forecast or investment advice. Based on historical return estimates (or user-specified assumptions for the Parameterized model); past correlations and volatility may not hold in the future. Does not account for taxes or fees beyond what was explicitly configured.",
     },
   ];
 
@@ -742,6 +1061,13 @@ function ReportTab({ result }: { result: SimulateResponse }) {
           >
             metrics.json
           </button>
+          <button
+            className="secondaryButton"
+            onClick={() => downloadText("result.json", JSON.stringify(result, null, 2), "application/json")}
+            type="button"
+          >
+            result.json
+          </button>
           <button className="secondaryButton" onClick={() => window.print()} type="button">
             Print / Save PDF
           </button>
@@ -766,6 +1092,10 @@ function ReportTab({ result }: { result: SimulateResponse }) {
           </p>
         </ReportSection>
 
+        <ReportSection title="Simulation diagnostics">
+          <DataTable caption="Simulation diagnostics" compact section={simulationDiagnosticsRows(overview, runConfig)} />
+        </ReportSection>
+
         <ReportSection title="3. Portfolio specification">
           <DataTable caption="Portfolio specification" compact section={portfolioSpecRows(runConfig)} />
         </ReportSection>
@@ -781,7 +1111,7 @@ function ReportTab({ result }: { result: SimulateResponse }) {
         <ReportSection title="6. Distribution analysis">
           <p>
             {overview.survived_count} of {overview.n_paths} simulated paths ({pctString(overview.survival_rate)})
-            survived through the full horizon. The ending balance spread runs from{" "}
+            remained positive through the full horizon. The ending balance spread runs from{" "}
             {money(metrics.percentile_table.ending_balance["10"])} at the 10th percentile to{" "}
             {money(metrics.percentile_table.ending_balance["90"])} at the 90th percentile.
           </p>
@@ -801,8 +1131,8 @@ function ReportTab({ result }: { result: SimulateResponse }) {
 
         <ReportSection title="Limitations">
           <p>
-            Monte Carlo simulation only &mdash; not a forecast or investment advice. Based on historical parameter
-            estimates (or user-specified parameters for the Parameterized model); past correlations and volatility
+            Monte Carlo simulation only &mdash; not a forecast or investment advice. Based on historical return
+            estimates (or user-specified assumptions for the Parameterized model); past correlations and volatility
             may not hold in the future. Does not account for taxes or fees beyond what was explicitly configured.
           </p>
         </ReportSection>
