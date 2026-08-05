@@ -1,0 +1,11 @@
+node_modules
+frontend/dist
+frontend/node_modules
+data/raw
+data/processed
+.git
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache

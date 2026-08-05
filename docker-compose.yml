@@ -1,0 +1,11 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8001:8000"
+    volumes:
+      - mc-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  mc-data:
