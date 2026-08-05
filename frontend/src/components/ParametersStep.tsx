@@ -594,6 +594,7 @@ function GoalsTable({ goals, onChange }: { goals: NamedGoal[]; onChange: (goals:
           </div>
           <div className="form-field">
             <input className="field" type="number" placeholder="Starts (year)" value={goal.starts_year} onChange={(e) => updateGoal(index, { starts_year: Number(e.target.value) })} />
+            {goal.starts_year < 0 && <div className="field-error">Start year cannot be negative.</div>}
           </div>
           <div className="form-field">
             <input className="field" type="number" placeholder="Ends (year)" value={goal.ends_year} onChange={(e) => updateGoal(index, { ends_year: Number(e.target.value) })} />

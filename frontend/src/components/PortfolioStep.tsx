@@ -48,9 +48,22 @@ function buildFacets(
     if (otherFilter.size && !otherFilter.has(fund[otherField] ?? "")) continue;
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
-  return Array.from(counts.entries())
-    .map(([value, count]) => ({ value, count }))
-    .sort((a, b) => a.value.localeCompare(b.value));
+  const built = Array.from(counts.entries()).map(([value, count]) => ({ value, count }));
+  return built.sort((a, b) => a.value.localeCompare(b.value));
+}
+
+// Cross-filtering can drop the very value the user has selected (built from
+// counts that exclude it under the OTHER active filter) -- always keep an
+// active selection visible in its own list, even at 0 count, so it stays
+// toggleable and isn't only escapable via "Clear all filters".
+function withSelectedFacets(facets: Facet[], selected: Set<string>): Facet[] {
+  if (!selected.size) return facets;
+  const present = new Set(facets.map((facet) => facet.value));
+  const missing = Array.from(selected)
+    .filter((value) => !present.has(value))
+    .map((value) => ({ value, count: 0 }));
+  if (!missing.length) return facets;
+  return [...facets, ...missing].sort((a, b) => a.value.localeCompare(b.value));
 }
 
 interface Props {
@@ -78,12 +91,12 @@ export function PortfolioStep({ funds, fundsLoading = false, active, onHoldingsC
   const fundsById = useMemo(() => new Map(funds.map((fund) => [fund.proj_id, fund])), [funds]);
 
   const amcFacets = useMemo(
-    () => buildFacets(funds, "amc_name_thai", categoryFilter, "policy_desc"),
-    [funds, categoryFilter]
+    () => withSelectedFacets(buildFacets(funds, "amc_name_thai", categoryFilter, "policy_desc"), amcFilter),
+    [funds, categoryFilter, amcFilter]
   );
   const categoryFacets = useMemo(
-    () => buildFacets(funds, "policy_desc", amcFilter, "amc_name_thai"),
-    [funds, amcFilter]
+    () => withSelectedFacets(buildFacets(funds, "policy_desc", amcFilter, "amc_name_thai"), categoryFilter),
+    [funds, amcFilter, categoryFilter]
   );
 
   const filteredFunds = useMemo(
@@ -337,7 +350,7 @@ function HoldingsRow({
   const options = funds.filter((item) => {
     if (selectedIds.has(item.proj_id) && item.proj_id !== row.projId) return false;
     if (!query) return true;
-    const haystack = `${item.proj_id} ${item.proj_name_thai ?? ""} ${item.amc_name_thai ?? ""}`.toLowerCase();
+    const haystack = `${item.proj_id} ${item.proj_name_thai ?? ""} ${item.amc_name_thai ?? ""} ${item.policy_desc ?? ""}`.toLowerCase();
     return haystack.includes(query);
   });
   // Show every match, not just the first few -- the dropdown already has a
@@ -397,7 +410,7 @@ function HoldingsRow({
           autoComplete="off"
         />
         <div className={open ? "fund-suggest open" : "fund-suggest"}>
-          {amcFacets.length || categoryFacets.length ? (
+          {amcFacets.length || categoryFacets.length > 1 ? (
             <div className="fund-suggest-filters">
               <button
                 className="fund-suggest-filter-toggle"
@@ -419,7 +432,7 @@ function HoldingsRow({
                   {amcFacets.length ? (
                     <FacetGroup label="AMC" facets={amcFacets} selected={amcFilter} onToggle={onToggleAmc} />
                   ) : null}
-                  {categoryFacets.length ? (
+                  {categoryFacets.length > 1 ? (
                     <FacetGroup facets={categoryFacets} formatLabel={categoryLabel} label="Fund category" onToggle={onToggleCategory} selected={categoryFilter} />
                   ) : null}
                 </div>

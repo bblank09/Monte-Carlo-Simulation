@@ -115,63 +115,70 @@ function OverviewTab({ result }: { result: SimulateResponse }) {
   }));
   const lowSurvival = overview.survival_rate < 0.5;
   return (
-    <div className="card">
-      <h2>Overview</h2>
-      <p>
-        {overview.survived_count} out of {overview.n_paths} simulated portfolios (
-        {(overview.survival_rate * 100).toFixed(2)}%) survived all withdrawals through the full simulation
-        horizon.
-      </p>
-      <div className="metricGrid">
-        <div className="metricCard">
-          <span>Median Ending Balance</span>
-          <strong>
-            {overview.median_ending_balance.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-          </strong>
-        </div>
-        <div className="metricCard">
-          <span>Median CAGR</span>
-          <strong>{(overview.median_cagr * 100).toFixed(2)}%</strong>
-        </div>
-        <div className={lowSurvival ? "metricCard metricCard-negative" : "metricCard metricCard-positive"}>
-          <span>Survival Rate</span>
-          <strong>{(overview.survival_rate * 100).toFixed(2)}%</strong>
-        </div>
-        <div className="metricCard">
-          <span>Simulated Paths</span>
-          <strong>{overview.n_paths.toLocaleString()}</strong>
-        </div>
-      </div>
-      {lowSurvival ? (
-        <div className="banner danger">
-          <span className="ic">&#9888;</span>
-          <div className="banner-body">
-            <p className="banner-message">
-              This plan has a high risk of running out of money before the end of the simulation period &mdash;
-              consider adjusting your withdrawal amount, initial portfolio, or asset allocation.
-            </p>
+    <div className="tabStack">
+      <div>
+        <p>
+          {overview.survived_count} out of {overview.n_paths} simulated portfolios (
+          {(overview.survival_rate * 100).toFixed(2)}%) survived all withdrawals through the full simulation
+          horizon.
+        </p>
+        <div className="metricGrid">
+          <div className="metricCard">
+            <span>Median Ending Balance</span>
+            <strong>
+              {overview.median_ending_balance.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+            </strong>
+          </div>
+          <div className="metricCard">
+            <span>Median CAGR</span>
+            <strong>{(overview.median_cagr * 100).toFixed(2)}%</strong>
+          </div>
+          <div className={lowSurvival ? "metricCard metricCard-negative" : "metricCard metricCard-positive"}>
+            <span>Survival Rate</span>
+            <strong>{(overview.survival_rate * 100).toFixed(2)}%</strong>
+          </div>
+          <div className="metricCard">
+            <span>Simulated Paths</span>
+            <strong>{overview.n_paths.toLocaleString()}</strong>
           </div>
         </div>
-      ) : null}
-      <h3>Portfolio Allocation</h3>
-      <AllocationPie slices={slices} />
-      <h3>Portfolio Holdings</h3>
-      <table>
-        <thead>
-          <tr>
-            <th>Fund</th>
-            <th>Weight</th>
-          </tr>
-        </thead>
-        <tbody>
-          {overview.holdings.map((h) => (
-            <tr key={h.proj_id}>
-              <td>{h.proj_id}</td>
-              <td>{h.weight.toFixed(1)}%</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+        {lowSurvival ? (
+          <div className="banner danger">
+            <span className="ic">&#9888;</span>
+            <div className="banner-body">
+              <p className="banner-message">
+                This plan has a high risk of running out of money before the end of the simulation period &mdash;
+                consider adjusting your withdrawal amount, initial portfolio, or asset allocation.
+              </p>
+            </div>
+          </div>
+        ) : null}
+      </div>
+      <section className="chartPanel">
+        <h3>Portfolio Allocation</h3>
+        <AllocationPie slices={slices} />
+      </section>
+      <div className="tables">
+        <div>
+          <h3>Portfolio Holdings</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Fund</th>
+                <th>Weight</th>
+              </tr>
+            </thead>
+            <tbody>
+              {overview.holdings.map((h) => (
+                <tr key={h.proj_id}>
+                  <td>{h.proj_id}</td>
+                  <td>{h.weight.toFixed(1)}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
@@ -527,30 +534,34 @@ function GoalsTab({ goals }: { goals: Record<string, unknown> }) {
     : [];
 
   return (
-    <div className="card">
-      <h2>Goals &amp; Cashflows</h2>
+    <div className="tabStack">
       {summary.length === 0 ? (
         <p>No goals were configured for this simulation.</p>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Purpose</th>
-              <th>Success Rate</th>
-            </tr>
-          </thead>
-          <tbody>
-            {summary.map((row) => (
-              <tr key={row.purpose}>
-                <td>{row.purpose}</td>
-                <td>{(row.success_rate * 100).toFixed(2)}%</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="tables">
+          <div>
+            <h3>Goal Success Rates</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>Purpose</th>
+                  <th>Success Rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.map((row) => (
+                  <tr key={row.purpose}>
+                    <td>{row.purpose}</td>
+                    <td>{(row.success_rate * 100).toFixed(2)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
       {hasCashflows ? (
-        <>
+        <section className="chartPanel">
           <h3>Simulated Cashflows</h3>
           <AxisCurve
             title="Annual Cashflow (nominal vs. present dollar)"
@@ -558,10 +569,10 @@ function GoalsTab({ goals }: { goals: Record<string, unknown> }) {
             valueFormat={(v) => v.toLocaleString(undefined, { maximumFractionDigits: 0 })}
             xFormat={(v) => `Yr ${v}`}
           />
-        </>
+        </section>
       ) : null}
       {glidePathSeries.length ? (
-        <>
+        <section className="chartPanel">
           <h3>Glide Path</h3>
           <p>Target allocation transition from the working-years portfolio to the retirement portfolio.</p>
           <AxisCurve
@@ -570,7 +581,7 @@ function GoalsTab({ goals }: { goals: Record<string, unknown> }) {
             valueFormat={(v) => `${v.toFixed(1)}%`}
             xFormat={(v) => `Yr ${v}`}
           />
-        </>
+        </section>
       ) : null}
     </div>
   );
