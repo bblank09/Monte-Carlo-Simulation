@@ -3,6 +3,12 @@ data/raw/*
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
+# Committed SEC Open Data cache (mirrors ../Backtest Portfolio Webull:SEC
+# OPENAI's data/sec/ pattern of committing its NAV cache) -- the app reads
+# these directly at request time instead of calling the live SEC API,
+# which is slow/flaky. See CLAUDE.md's Data flow section.
+!data/processed/fund_universe.csv
+!data/processed/nav_panel.parquet
 .ipynb_checkpoints/
 __pycache__/
 conf/
