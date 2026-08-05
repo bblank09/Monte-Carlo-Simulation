@@ -12,3 +12,5 @@ webull_data_sdk.log
 .pytest_cache/
 
 .worktrees/
+frontend/test-results/
+frontend/playwright-report/
