@@ -16,7 +16,8 @@
 - Excel recomputation in 4.4 MUST use native Excel formulas (SUM, PRODUCT, PERCENTILE.INC, STDEV.S, etc.) referencing the raw NAV/return data — copying the Python formula as a pasted-in number is not verification and is explicitly disallowed by the checklist.
 - Compare to 6 decimal places. Anything that differs beyond that needs a written reason (rounding, ddof convention, trading-day-count convention, etc.) — a bare "doesn't match" is not an acceptable end state for this task.
 - Any real bug found must be fixed via TDD: write the failing test in `backend/tests/` first, watch it fail, then fix `backend/app/engine/`.
-- Funds selected for 4.3: **K-SET50** (`unique_id=C0000000021`, equity, `main` class) and **K-MONEY** (`unique_id=C0000000021`, money-market, `main` class) — both have `nav_completeness ≈ 0.971`, span 2015-01 to 2026-07, no large recent gaps except the shared 2024-07→2024-10 gap. Window: **2025-01-01 to 2025-04-30** (4 months), which sits after that gap.
+- Funds selected for 4.3: **K-SET50** (`proj_id=M0209_2548`, equity, `main` class) and **K-MONEY** (`proj_id=M0337_2550`, money-market, `main` class) — note both share `unique_id=C0000000021` (same AMC) but have distinct `proj_id`s, which is the actual fund-identifying field the API uses.
+- **AMENDED (post-Task-3, by explicit user decision):** the plan originally called for a 4-month historical window (2025-01–2025-04). Task 3 discovered the live API's `SimulateRequest` schema has **no historical-window field at all** — only `simulation_period_years` (`ge=5, le=75`, a forward-projection horizon), and the engine always calibrates `mu`/`sigma` from the **full** committed NAV history (2015-01 through the cache's latest date), then projects forward. The user confirmed: use the actual run as executed — `simulation_period_years=5`, full-history calibration, `n_paths=2000`, `seed=42`, weights 50/50, `rebalancing=annual`, `time_series_model=normal`, a real goal configured (`multi_goal_enabled=true`, one withdrawal goal `starts_year=1..ends_year=5`) — as ground truth. **Every downstream task (4, 5) reconciles against this actual run, not the original 4-month concept.** The result JSON is `docs/manual-verification-run-result.json` (Task 3, complete) with `run_id=run_20260806_071020_b81fa66d`. Actual JSON response key layout (differs from the plan's original shorthand): top-level `{run_id, created_at, data_source, overview, growth, distribution, metrics, risk, goals, run_config}`; `metrics = {percentile_table, sharpe, sortino, safe_withdrawal_rate, perpetual_withdrawal_rate}`; `risk = {correlation_and_returns, value_at_risk, expected_shortfall, expected_return_by_horizon, annual_return_probability, loss_probability}`; `growth = {fan_chart, survival_over_time}`; `distribution = {ending_balance_histogram, max_drawdown_histogram}`; `goals` populated with `summary`, `cashflows_nominal`, `cashflows_present_dollar`.
 
 ---
 
@@ -197,22 +198,20 @@ This is the core verification task. Load the **`anthropic-skills:xlsx`** skill w
 
 - [ ] **Step 1: `Raw Data` sheet**
 
-Export the exact NAV series used for K-SET50 and K-MONEY over 2025-01-01..2025-04-30 from `data/processed/nav_panel.parquet` into columns (date, NAV_SET50, NAV_MONEY), plus a daily-return column for each via `=NAV_t/NAV_{t-1}-1`. This is the ground truth every other sheet's formulas reference — no values are pasted from Python except this raw NAV feed, which is itself the committed cache CLAUDE.md documents as authoritative.
+Export the exact **full NAV history** the live engine actually used to derive `mu`/`sigma` for this run — per the Global Constraints amendment, the engine calibrates from full committed history, not a 4-month slice. Pull the full daily NAV series for `proj_id=M0209_2548` (K-SET50) and `proj_id=M0337_2550` (K-MONEY) from `data/processed/nav_panel.parquet` into columns (date, NAV_SET50, NAV_MONEY), plus a daily-return column for each via `=NAV_t/NAV_{t-1}-1`. This is the ground truth every other sheet's formulas reference — no values are pasted from Python except this raw NAV feed, which is itself the committed cache CLAUDE.md documents as authoritative. Read the parquet's actual column schema first (`df.columns.tolist()`) to confirm whether columns are keyed by `proj_id` or another id — do not assume the schema.
 
 ```bash
 python3 -c "
 import pandas as pd
 df = pd.read_parquet('data/processed/nav_panel.parquet')
-sub = df.loc['2025-01-01':'2025-04-30', ['C0000000021']]
-sub.to_csv('/tmp/manual-verify-navs.csv')
-print(sub.head())
+print(df.columns.tolist()[:10])
 "
 ```
-(Adjust column selectors once the actual parquet schema for K-SET50/K-MONEY unique_ids is confirmed — read the parquet columns first with `df.columns.tolist()`.)
+Read `backend/app/api/simulate.py`'s `load_nav_returns` to confirm the exact date range and column-selection logic the live engine used, then replicate it for the export.
 
 - [ ] **Step 2: `Overview` sheet**
 
-Recompute, with native formulas, ending balance percentiles and CAGR percentiles by simulating the same GBM math **conceptually explained, not by re-running 2000 paths in Excel** — instead, reconcile the **closed-form portfolio statistics** (annualized mean/vol of the historical window feeding the GBM `mu`/`sigma` inputs) against what the JSON's `percentile_table` implies, e.g.:
+Recompute, with native formulas, ending balance percentiles and CAGR percentiles by simulating the same GBM math **conceptually explained, not by re-running 2000 paths in Excel** — instead, reconcile the **closed-form portfolio statistics** (annualized mean/vol of the historical window feeding the GBM `mu`/`sigma` inputs) against what the JSON's `metrics.percentile_table` implies (note: `percentile_table` is nested under the `metrics` key in the actual response, not top-level), e.g.:
   - `=AVERAGE(daily_returns)*252` vs. the `mu` the API would have derived
   - `=STDEV.S(daily_returns)*SQRT(252)` vs. `sigma`
   - Cross-check that `percentile_table.cagr["50"]` from the JSON is plausible given those two numbers (within 1 simulation-noise band, not exact — GBM percentiles are stochastic, so state explicitly in the sheet that percentile-band values are *plausibility-checked*, not bit-exact, while all deterministic aggregate formulas below are bit-exact to 6 decimals).
@@ -223,11 +222,11 @@ Not applicable as literal per-path Excel columns (2000 stochastic paths). Instea
 
 - [ ] **Step 4: `Distribution` sheet**
 
-Reconcile `expected_return_by_horizon` and `annual_return_probability`: these are functions of the *same* `mu`/`sigma`/`n_paths`/`seed` — document in the sheet that exact percentile reproduction requires the identical PRNG stream (numpy `default_rng(seed)`), which Excel cannot replicate deterministically. State this as a **known, documented limitation** of Excel-only verification for stochastic percentile outputs, and instead verify: (a) monotonicity (P90 > P75 > P50...) holds in the JSON, (b) `annual_return_probability` thresholds are monotonically decreasing in threshold for a fixed horizon, both checkable via Excel formulas directly on the JSON-exported percentile numbers (no re-simulation needed).
+Reconcile `risk.expected_return_by_horizon` and `risk.annual_return_probability` (both live under the `risk` key in the actual response): these are functions of the *same* `mu`/`sigma`/`n_paths`/`seed` — document in the sheet that exact percentile reproduction requires the identical PRNG stream (numpy `default_rng(seed)`), which Excel cannot replicate deterministically. State this as a **known, documented limitation** of Excel-only verification for stochastic percentile outputs, and instead verify: (a) monotonicity (P90 > P75 > P50...) holds in the JSON, (b) `annual_return_probability` thresholds are monotonically decreasing in threshold for a fixed horizon, both checkable via Excel formulas directly on the JSON-exported percentile numbers (no re-simulation needed).
 
 - [ ] **Step 5: `Metrics` sheet**
 
-Recompute Sharpe/Sortino/withdrawal-rate **formulas themselves** against a single concrete illustrative path (e.g. take the JSON's own P50 path if the API exposes one path's annual returns, or construct one manual example path of 4 annual returns) fully by hand in Excel:
+Recompute Sharpe/Sortino/withdrawal-rate **formulas themselves** (JSON keys: `metrics.sharpe`, `metrics.sortino`, `metrics.safe_withdrawal_rate`, `metrics.perpetual_withdrawal_rate` — separate keys under `metrics`, not one combined object) against a single concrete illustrative path (construct one manual example path of 5 annual returns matching the run's `simulation_period_years=5`) fully by hand in Excel. Cross-reference Task 2's audit's two flagged bug candidates here — the Sharpe/Sortino numerator (geometric CAGR) vs. denominator (arithmetic per-period std) basis mismatch — and confirm numerically on this illustrative path whether it produces a materially different ratio than a textbook same-basis Sharpe would:
   - Sharpe: `=(AnnualizedReturn-RiskFreeRate)/Volatility`
   - Sortino: downside deviation via `=SQRT(SUMPRODUCT((returns<0)*returns^2)/COUNT(returns))`
   - Safe withdrawal rate: goal-seek (Excel's built-in Goal Seek, or `=IRR`-style manual bisection walkthrough documented in the sheet) confirming the same balance-depletion formula `balance = MAX(balance*g - rate, 0)` per period.
@@ -235,17 +234,17 @@ Recompute Sharpe/Sortino/withdrawal-rate **formulas themselves** against a singl
 
 - [ ] **Step 6: `Risk & Correlation` sheet**
 
-Fully bit-exact reconcilable — these are deterministic functions of the historical return series, not of simulated paths:
-  - `=CORREL(returns_SET50, returns_MONEY)` vs. JSON `correlation_and_returns_table.correlation`
+Fully bit-exact reconcilable — these are deterministic functions of the historical return series, not of simulated paths (JSON key: `risk.correlation_and_returns`, not `correlation_and_returns_table`):
+  - `=CORREL(returns_SET50, returns_MONEY)` vs. JSON `risk.correlation_and_returns.correlation`
   - `=STDEV.S(returns)*SQRT(252)` vs. JSON `volatility`
   - `=AVERAGE(returns)*252` vs. JSON `expected_return`
   - `=PRODUCT(1+returns)^(252/COUNT(returns))-1` vs. JSON `cagr`
-  - Parametric VaR/ES via `=NORM.S.INV(0.90)` and the Jorion closed-form from Task 1's citation.
+  - Parametric VaR/ES via `=NORM.S.INV(0.90)` and the Jorion closed-form from Task 1's citation, vs. JSON `risk.value_at_risk` / `risk.expected_shortfall`.
   All of these must match the JSON to 6 decimals — flag any that don't as real discrepancies.
 
-- [ ] **Step 7: `Goals & Cashflows` sheet** (only if Task 3's request included a goal)
+- [ ] **Step 7: `Goals & Cashflows` sheet** (Task 3's run included a real goal — this sheet is mandatory, not conditional)
 
-Hand-trace the cashflow application formula from `goals.py` against a manual 4-period balance roll-forward in Excel, cell by cell.
+Hand-trace the cashflow application formula from `goals.py` against a manual 5-period (`simulation_period_years=5`) balance roll-forward in Excel, cell by cell, reconciling against the JSON's `goals.summary` (`success_rate`), `goals.cashflows_nominal`, and `goals.cashflows_present_dollar` for the "Retirement withdrawal" goal (annual $20,000 inflation-adjusted withdrawal, years 1–5).
 
 - [ ] **Step 8: `Summary Tie-Out` sheet**
 
