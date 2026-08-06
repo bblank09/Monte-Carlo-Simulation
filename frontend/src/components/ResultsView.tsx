@@ -576,8 +576,8 @@ function MetricsTab({ result }: { result: SimulateResponse }) {
       <div className="panelGrid">
         <DataTable
           section={groupedMetricsSection(metrics, "Performance outcomes", [
-            ["TWRR (nominal)", (p) => pctString(pt.twrr_nominal[p])],
-            ["TWRR (real)", (p) => pctString(pt.twrr_real[p])],
+            ["TWRR (nominal, excl. cashflows)", (p) => pctString(pt.twrr_nominal[p])],
+            ["TWRR (real, excl. cashflows)", (p) => pctString(pt.twrr_real[p])],
             ["CAGR", (p) => pctString(pt.cagr[p])],
             ["Ending Balance", (p) => money(pt.ending_balance[p])],
             ["Ending Balance (real)", (p) => money(pt.ending_balance_real[p])],

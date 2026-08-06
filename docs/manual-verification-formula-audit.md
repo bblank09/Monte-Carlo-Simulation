@@ -14,6 +14,14 @@ Bug candidates: **TWRR/CAGR conflation** (`percentile_table`), **Sharpe ratio
 numerator** (`sharpe_sortino_by_percentile`), **Sortino ratio numerator**
 (`sharpe_sortino_by_percentile`).
 
+**Update (Task 5, post-hoc):** All bug candidates named above were confirmed
+live-number bugs by Task 4's Excel tie-out and fixed in commits `e3afb9e` and
+`3e56450`. In addition, Task 4/5's investigation surfaced a fourth,
+previously-uncaught same-family bug in row #11 (Perpetual Withdrawal Rate,
+originally marked "✅ Exact" below) — see that row's "Resolution (Task 5)"
+note. See per-row resolution notes below and `docs/manual-verification-refs.md`
+/ `docs/manual-verification-2026-08-06.xlsx` for the numeric verification.
+
 ## Comparison table
 
 | # | Formula | Reference equation | Code (file:line) | Match? | Notes |
@@ -21,14 +29,14 @@ numerator** (`sharpe_sortino_by_percentile`), **Sortino ratio numerator**
 | 1 | GBM path simulation | `S(t+Δt) = S(t)·exp[(μ−½σ²)Δt + σ√Δt·Z]`, correlated via Cholesky `L` | `backend/app/engine/gbm.py:9-17` | ✅ Exact | `L = np.linalg.cholesky(sigma)` (gbm.py:9), `drift = (mu - 0.5*np.diag(sigma))*dt` (gbm.py:10), `shock = drift + sqrt(dt)*z_corr` (gbm.py:16), `paths[t] = paths[t-1]*exp(shock)` (gbm.py:17). Verbatim. |
 | 2 | Constant-mix (rebalanced) portfolio roll-forward | `V(t_k+1⁻) = Σ_i [w_i·V(t_k)]·(S_i(t_k+1)/S_i(t_k))`, re-split by weights each rebalance | `backend/app/engine/statistical.py:35-58`, core loop 49-57 | ✅ Exact | `asset_growth = asset_paths[end]/asset_paths[start]` (statistical.py:52), `portfolio_value = (values_at_period_start*asset_growth).sum(axis=1)` (statistical.py:54), re-split `values_at_period_start = portfolio_value[:,None]*weights[None,:]` (statistical.py:55). Textbook constant-mix roll-forward. |
 | 3 | CAGR | `CAGR = (V_end/V_start)^(1/n) − 1` | `backend/app/engine/results.py:27` (`percentile_table`), `results.py:181` (`correlation_and_returns_table`) | ✅ Exact | `cagr = paths[:, -1] ** (1/n_years) - 1` (results.py:27), `cagr = cumulative ** (periods_per_year/n_periods) - 1` (results.py:181) — same formula, `n_periods/periods_per_year ≈ n_years`. |
-| 4 | TWRR | `TWRR = [Π(1+R_i)]^(1/n) − 1` on a cashflow-free sub-period return series | `backend/app/engine/results.py:33` (`twrr_nominal = cagr`) | ⚠️ Deviation | See "TWRR/CAGR conflation" below. **[BUG CANDIDATE]** |
+| 4 | TWRR | `TWRR = [Π(1+R_i)]^(1/n) − 1` on a cashflow-free sub-period return series | `backend/app/engine/results.py:33` (`twrr_nominal = cagr`) | ⚠️ Deviation | See "TWRR/CAGR conflation" below. **[BUG CANDIDATE — FIXED, see Resolution (Task 5) note below]** |
 | 5 | Maximum drawdown | `MDD = min_t[V(t)/max_{s≤t}V(s) − 1]` | `backend/app/engine/results.py:35-36`; duplicated at `backend/app/engine/orchestrator.py:113-114` | ✅ Exact | `running_max = np.maximum.accumulate(paths, axis=1)`, `max_drawdown = (paths/running_max - 1).min(axis=1)` (results.py:35-36); orchestrator.py:113-114 recomputes identically on `dollar_paths` — scale-invariant so numerically equivalent. |
 | 6 | Parametric VaR/ES (Gaussian) | `VaR=−μ+zσ`, `ES=−μ+[φ(z)/(1−α)]σ` | `backend/app/engine/results.py:108-114` | ✅ Exact | `z = norm.ppf(alpha)` (111), `var = -port_mu + z*port_sd` (112), `es = -port_mu + (norm.pdf(z)/(1-alpha))*port_sd` (113). |
 | 7 | Historical/simulation VaR/ES | `VaR=Quantile_α(L)`, `ES=E[L\|L≥VaR]`, `L=−(end−start)` | `backend/app/engine/results.py:117-123` | ✅ Exact | `losses = -ending_values` (120), `var_threshold = percentile(losses, alpha*100)` (121), `es = losses[losses>=var_threshold].mean()` (122). |
-| 8 | Sharpe ratio | `Sharpe = (R_p − R_f)/σ_p` | `backend/app/engine/results.py:126-139`, `sharpe` at line 134 | ⚠️ Deviation | Numerator is CAGR (geometric total-path return), not canonical arithmetic mean/period return. See below. **[BUG CANDIDATE]** |
-| 9 | Sortino ratio | `Sortino = (R_p − MAR)/DD`, `DD=sqrt(E[min(R−MAR,0)²])` | `backend/app/engine/results.py:126-139`, `sortino` at line 135 | ⚠️ Deviation | Same CAGR-numerator issue as Sharpe, plus mixed geometric/arithmetic basis. See below. **[BUG CANDIDATE]** |
+| 8 | Sharpe ratio | `Sharpe = (R_p − R_f)/σ_p` | `backend/app/engine/results.py:126-139`, `sharpe` at line 134 | ⚠️ Deviation | Numerator is CAGR (geometric total-path return), not canonical arithmetic mean/period return. See below. **[BUG CANDIDATE — FIXED, see Resolution (Task 5) note below]** |
+| 9 | Sortino ratio | `Sortino = (R_p − MAR)/DD`, `DD=sqrt(E[min(R−MAR,0)²])` | `backend/app/engine/results.py:126-139`, `sortino` at line 135 | ⚠️ Deviation | Same CAGR-numerator issue as Sharpe, plus mixed geometric/arithmetic basis. See below. **[BUG CANDIDATE — FIXED, see Resolution (Task 5) note below]** |
 | 10 | Safe withdrawal rate (root-find) | Largest constant `w` s.t. `Balance_n ≥ 0` under sequential compounding | `backend/app/engine/results.py:142-160`, `brentq` call at 158 | ⚠️ Deviation | Root-found percentage-of-$1-initial-balance per Monte Carlo path, not Bengen's original fixed-dollar single-sequence grid search. **[DOCUMENTED]** — see below. |
-| 11 | Perpetual withdrawal rate | `PWR = μ − ½σ²` | `backend/app/engine/results.py:162-165` | ✅ Exact | `pwr = per_path_annual_returns - 0.5*per_path_vol**2` (165). |
+| 11 | Perpetual withdrawal rate | `PWR = μ − ½σ²` | `backend/app/engine/results.py:162-165` | ❌ Was incorrectly marked "✅ Exact" — **this audit missed a bug identical in kind to #8/#9** | Original note (now superseded): `pwr = per_path_annual_returns - 0.5*per_path_vol**2` (165). At the time of this audit `per_path_annual_returns` was `paths[:, -1] ** (1/n_years) - 1` — a per-path **geometric CAGR** — fed into the `μ − ½σ²` formula. That formula's entire purpose is converting an *arithmetic* mean return into an approximate geometric/sustainable rate; feeding it an already-geometric CAGR double-applies the variance-drag correction, producing a materially wrong PWR. This is the exact same statistic-basis mismatch flagged for Sharpe/Sortino (rows #8/#9) but was missed here because the formula shape (`μ − ½σ²`) matched the reference equation syntactically, and the audit did not trace what `per_path_annual_returns` actually was. **[Resolution (Task 5), commit `3e56450`]** Fixed by replacing the CAGR-based `per_path_annual_returns` with `per_period_returns.mean(axis=1)` (the arithmetic mean of the per-period return series), matching the same-basis fix already applied to Sharpe/Sortino. The verdict above is corrected from "✅ Exact" to reflect that this was in fact a bug, now fixed. |
 | 12 | Bootstrap historical resampling (iid + block) | iid resample w/ replacement; block bootstrap draws contiguous length-`L` blocks | `backend/app/engine/historical.py:11-17` (iid), `:45-60` (`_block_bootstrap`) | ✅ Match, edge case noted | `rng.choice(..., replace=True)` (13, 16) is exact iid bootstrap. `_block_bootstrap`'s `mode="wrap"` padding (historical.py:57) is only reachable when `n_available < block_years` (start range is `[0, n_available-block_years]` inclusive, so blocks never overrun in the normal case) — the "wrap boundary correlation loss" the refs doc flagged is effectively unreachable in practice. **[DOCUMENTED]** |
 | 13 | GARCH(1,1) volatility + drift re-injection | `σ_t² = ω+αε²_{t-1}+βσ²_{t-1}`, `r_t=μ_t+σ_t z_t` | `backend/app/engine/forecasted.py:21-45`, drift re-add at line 43 | ⚠️ Deviation | `mean="Zero"` fit + externally re-added `daily_mu`, justified in-code. See below. **[DOCUMENTED]** |
 | 14 | Inflation adjustment (Fisher) | `(1+r_nom)=(1+r_real)(1+π)`; `I_n=Π(1+π_t)` | `backend/app/engine/inflation.py:4-18`; `goals.py::_inflation_factors:59-70` | ✅ Exact | `simulate_inflation` draws `π_t~N(mean,vol)` or bootstraps CPI (inflation.py:13,16); `_inflation_factors` computes `np.cumprod(1.0+inflation_draws, axis=1)` (goals.py:70) = `I_n` exactly; `results.py:46` divides nominal ending balance by `cumulative_inflation` — exact discrete Fisher deflation. |
@@ -68,6 +76,23 @@ should numerically compare `twrr_nominal` against `cagr` and against a
 correctly cashflow-adjusted TWRR on a run with a non-trivial cashflow to
 confirm whether the reported number is misleading. **[BUG CANDIDATE]**
 
+**Resolution (Task 5, commit `e3afb9e`):** Confirmed a genuine bug by Task 4's
+live Excel tie-out. Fixed by chain-linking `twrr_nominal` from the pure
+asset growth-factor path (`growth_only_paths`) whenever it is supplied (i.e.
+the run has a cashflow/goal), instead of hardcoding it to `cagr`. A follow-up
+fix in commit `3e56450` corrected the companion `twrr_real` field, which was
+still deflating the post-cashflow `ending` balance instead of
+`growth_only_paths`' terminal value — `twrr_real` now deflates the same
+cashflow-free basis as `twrr_nominal`, so the two coincide exactly at zero
+inflation. Regression tests: `test_twrr_nominal_strips_cashflow_effect_instead_of_matching_cagr`,
+`test_twrr_real_matches_twrr_nominal_when_inflation_is_zero`. **Note for the
+frontend:** because `twrr_nominal`/`twrr_real` are now correctly stripped of
+cashflow effects while `cagr` is not, a run with a withdrawal goal can now
+show a strongly positive TWRR beside a negative CAGR in the same results
+table — this is expected/correct post-fix behavior, not a bug, and the
+results table has been relabeled ("TWRR (nominal, excl. cashflows)" / "TWRR
+(real, excl. cashflows)") to make the distinction explicit to users.
+
 **Sharpe and Sortino ratio numerators (`results.py::sharpe_sortino_by_percentile`,
 lines 126-139).** Both ratios use `per_path_annual_returns = paths[:, -1] **
 (1/n_years) - 1` (line 128) — the per-path CAGR, a geometric total-return
@@ -97,6 +122,17 @@ seed's per-path annual return series using both the code's CAGR-based
 numerator and a strict arithmetic-mean numerator, and check whether the
 resulting percentile bands differ meaningfully. **[BUG CANDIDATE]**
 (applies to both formulas #8 and #9 in the table above)
+
+**Resolution (Task 5, commit `e3afb9e`):** Confirmed a genuine basis-mismatch
+bug by hand-computation against a fixed-seed per-path return series. Fixed
+by replacing the CAGR-based `per_path_annual_returns` numerator with the
+arithmetic mean of the same `per_period_returns` series already used for the
+volatility/downside-volatility denominator, for both Sharpe and Sortino.
+Regression test: `test_sharpe_uses_same_basis_numerator_and_denominator`.
+This same statistic-basis bug was independently present a third time in the
+Perpetual Withdrawal Rate formula (row #11 above, originally mismarked "✅
+Exact") and was fixed in the follow-up commit `3e56450` — see that row's
+Resolution note.
 
 **Safe withdrawal rate via `brentq` (`results.py::withdrawal_rates_by_percentile`,
 lines 142-160).** The code root-finds, per simulated path, a constant
@@ -219,3 +255,23 @@ version in `results.py`. No inline formula logic beyond simple wiring/plumbing
 was found in `backend/app/api/simulate.py` proper (`backend/app/api/`
 directory contains `simulate.py`; all quantitative formulas live in `engine/`
 and are imported into `orchestrator.py`, which `simulate.py` calls).
+
+## Post-fix provenance and disposition notes (added after Task 5)
+
+**`docs/manual-verification-run-result.json` is a PRE-FIX artifact.** It
+captures engine output at commit `253f49a`, before the Task 5 fixes. The
+`twrr_nominal`, `twrr_real`, `sharpe`, `sortino`, and
+`perpetual_withdrawal_rate` fields, plus `goals.cashflows_nominal`'s 5th
+entry, would all differ if the same request were re-run against the current
+(fixed) engine at commit `3e56450` or later. This file was intentionally
+*not* re-run/regenerated as part of closing out the final review — it is
+left as a historical pre-fix snapshot; do not treat its numeric fields as
+current ground truth.
+
+**NAV forward-fill disposition (Minor #5).** The workbook's Tie-Out sheet
+asks Task 5 to confirm whether the 3 forward-filled NAV gap dates are
+intentional. Confirmed intentional and bounded — `returns.py`'s
+`MAX_TOLERATED_GAP_RUN=5` forward-fill is deliberate data-layer behavior,
+out of scope for `backend/app/engine/` fixes in this plan; CLAUDE.md's "NAV
+gaps are hard errors" landmine describes the simulation engine's contract
+with already-validated data, not this upstream data-preparation step.
