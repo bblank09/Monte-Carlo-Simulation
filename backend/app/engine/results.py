@@ -28,9 +28,18 @@ def percentile_table(paths: np.ndarray, initial_amount: float, inflation_draws: 
     per_period_returns = _safe_period_returns(paths)
     annual_mean_return = per_period_returns.mean(axis=1)
     annualized_volatility = per_period_returns.std(axis=1)
-    # TWRR strips cashflow timing by construction (it's a ratio of period-end to
-    # period-start values) -- on this array, nominal TWRR and CAGR coincide.
-    twrr_nominal = cagr
+    # TWRR must strip cashflow timing/size effects out of the return figure. `paths`
+    # here is the (possibly) post-cashflow normalized balance array, so a CAGR taken
+    # directly on it conflates asset performance with contribution/withdrawal timing
+    # -- exactly what TWRR is defined to exclude. `growth_only_paths`, when supplied,
+    # is the pure asset growth-factor path untouched by any cashflow, so chain-linking
+    # it gives a genuine cashflow-free TWRR. Only when there is no cashflow at all
+    # (growth_only_paths is None) does `paths` already equal the growth-only path, in
+    # which case nominal TWRR and CAGR do coincide.
+    if growth_only_paths is not None:
+        twrr_nominal = growth_only_paths[:, -1] ** (1 / n_years) - 1
+    else:
+        twrr_nominal = cagr
 
     running_max = np.maximum.accumulate(paths, axis=1)
     max_drawdown = (paths / running_max - 1).min(axis=1)
@@ -124,9 +133,15 @@ def compute_var_es(ending_values: np.ndarray, alpha: float = 0.90) -> tuple[floa
 
 
 def sharpe_sortino_by_percentile(paths: np.ndarray, risk_free_rate: float = 0.0) -> dict:
-    n_years = paths.shape[1] - 1
-    per_path_annual_returns = paths[:, -1] ** (1 / n_years) - 1
     per_period_returns = _safe_period_returns(paths)
+    # Numerator and denominator must be built from the same statistic basis (Sharpe
+    # 1994; Sortino & Price 1994): the mean of the SAME per-period return series the
+    # volatility/downside-deviation below is computed from. Using the per-path
+    # geometric CAGR here instead would mix "total compounded growth annualized"
+    # (numerator) with "average period volatility" (denominator) -- a basis mismatch
+    # that biases the ratio low whenever returns are volatile (Jensen's gap between
+    # geometric and arithmetic means).
+    per_path_annual_returns = per_period_returns.mean(axis=1)
     per_path_vol = per_period_returns.std(axis=1) * np.sqrt(1)
     downside = np.where(per_period_returns < 0, per_period_returns, 0.0)
     per_path_downside_vol = np.sqrt((downside ** 2).mean(axis=1))

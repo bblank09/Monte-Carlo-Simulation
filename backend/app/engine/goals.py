@@ -92,7 +92,14 @@ def apply_named_goals(
         grown = values[:, year] * growth_factors[:, year]
         net_cashflow = np.zeros(n_paths)
         for goal in goals:
-            if goal["starts_year"] <= year < goal["ends_year"]:
+            # `year` indexes the transition that LANDS at balance year (year + 1), so a
+            # goal active for calendar years [starts_year, ends_year] inclusive fires on
+            # every transition whose landing year falls in that inclusive range --
+            # equivalently `starts_year - 1 <= year < ends_year`. Comparing `year` itself
+            # against `starts_year` (i.e. `starts_year <= year < ends_year`) silently
+            # drops the very first withdrawal/contribution year whenever starts_year >= 1
+            # (starts_year == 0 is unaffected since year is never negative).
+            if goal["starts_year"] - 1 <= year < goal["ends_year"]:
                 sign = -1.0 if goal["is_withdrawal"] else 1.0
                 if goal.get("inflation_adjusted", False):
                     net_cashflow += sign * _annualized_goal_amount(goal) * inflation_factors[:, year]
@@ -102,7 +109,14 @@ def apply_named_goals(
         solvent &= new_balance >= 0
         values[:, year + 1] = np.maximum(new_balance, 0.0)
         for goal in goals:
-            if goal["starts_year"] <= year < goal["ends_year"]:
+            # `year` indexes the transition that LANDS at balance year (year + 1), so a
+            # goal active for calendar years [starts_year, ends_year] inclusive fires on
+            # every transition whose landing year falls in that inclusive range --
+            # equivalently `starts_year - 1 <= year < ends_year`. Comparing `year` itself
+            # against `starts_year` (i.e. `starts_year <= year < ends_year`) silently
+            # drops the very first withdrawal/contribution year whenever starts_year >= 1
+            # (starts_year == 0 is unaffected since year is never negative).
+            if goal["starts_year"] - 1 <= year < goal["ends_year"]:
                 goal_solvent_tracking[id(goal)] &= solvent
 
     summary = []
@@ -150,7 +164,14 @@ def build_cashflow_series(paths: np.ndarray, initial_amount: float, goals: list[
     for year in range(n_years):
         net = 0.0
         for goal in goals:
-            if goal["starts_year"] <= year < goal["ends_year"]:
+            # `year` indexes the transition that LANDS at balance year (year + 1), so a
+            # goal active for calendar years [starts_year, ends_year] inclusive fires on
+            # every transition whose landing year falls in that inclusive range --
+            # equivalently `starts_year - 1 <= year < ends_year`. Comparing `year` itself
+            # against `starts_year` (i.e. `starts_year <= year < ends_year`) silently
+            # drops the very first withdrawal/contribution year whenever starts_year >= 1
+            # (starts_year == 0 is unaffected since year is never negative).
+            if goal["starts_year"] - 1 <= year < goal["ends_year"]:
                 sign = -1.0 if goal["is_withdrawal"] else 1.0
                 amount = _annualized_goal_amount(goal)
                 if goal.get("inflation_adjusted", False):
