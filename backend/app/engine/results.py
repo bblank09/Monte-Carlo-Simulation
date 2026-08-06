@@ -53,10 +53,19 @@ def percentile_table(paths: np.ndarray, initial_amount: float, inflation_draws: 
     if inflation_draws is not None:
         cumulative_inflation = np.prod(1 + inflation_draws, axis=1)
         ending_real = ending / cumulative_inflation
-        twrr_real = (ending_real / initial_amount) ** (1 / n_years) - 1
+        # twrr_real must be built from the same cashflow-free basis as twrr_nominal --
+        # deflating `ending` (the post-cashflow dollar balance) reintroduces exactly the
+        # contribution/withdrawal timing contamination twrr_nominal was fixed to strip
+        # out. Deflate the growth-only path's terminal value instead, so that with zero
+        # inflation twrr_real == twrr_nominal exactly.
+        if growth_only_paths is not None:
+            real_cumulative_growth = growth_only_paths[:, -1] / cumulative_inflation
+            twrr_real = real_cumulative_growth ** (1 / n_years) - 1
+        else:
+            twrr_real = (ending_real / initial_amount) ** (1 / n_years) - 1
     else:
         ending_real = ending
-        twrr_real = cagr
+        twrr_real = twrr_nominal
 
     return {
         "ending_balance": _percentile_band(ending),
@@ -174,8 +183,13 @@ def withdrawal_rates_by_percentile(paths: np.ndarray, n_years: int) -> dict:
         except ValueError:
             swr[i] = 0.0 if final_balance(1.0) > 0 else 1.0
 
-    per_path_annual_returns = paths[:, -1] ** (1 / n_years) - 1
     per_period_returns = _safe_period_returns(paths)
+    # PWR ("mu - 1/2 sigma^2") converts an ARITHMETIC mean return into an approximate
+    # geometric/sustainable growth rate. `paths[:, -1] ** (1/n_years) - 1` is already a
+    # per-path GEOMETRIC CAGR -- feeding that in as `mu` double-applies the variance-drag
+    # correction. Use the arithmetic mean of the per-period return series instead (the
+    # same basis already used for the volatility term and for Sharpe/Sortino above).
+    per_path_annual_returns = per_period_returns.mean(axis=1)
     per_path_vol = per_period_returns.std(axis=1)
     pwr = per_path_annual_returns - 0.5 * per_path_vol ** 2
 

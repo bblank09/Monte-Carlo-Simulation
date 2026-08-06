@@ -8,8 +8,13 @@ verification (docs/manual-verification-formula-audit.md, Task 2/4/5):
    build_cashflow_series
 """
 import numpy as np
+import pytest
 
-from backend.app.engine.results import percentile_table, sharpe_sortino_by_percentile
+from backend.app.engine.results import (
+    percentile_table,
+    sharpe_sortino_by_percentile,
+    withdrawal_rates_by_percentile,
+)
 from backend.app.engine.goals import apply_named_goals, build_cashflow_series
 
 
@@ -36,8 +41,51 @@ def test_twrr_nominal_strips_cashflow_effect_instead_of_matching_cagr():
 
 
 def pytest_approx(value, abs=1e-9):
-    import pytest
     return pytest.approx(value, abs=abs)
+
+
+def test_twrr_real_matches_twrr_nominal_when_inflation_is_zero():
+    # Same setup as the twrr_nominal test above: growth_only_paths carries the
+    # pure asset-growth path (10%/yr for 2 years), post_cashflow_paths carries
+    # the post-withdrawal dollar balance. With exactly zero inflation, real and
+    # nominal TWRR must coincide -- both describe the same cashflow-free asset
+    # growth, just with a no-op deflator applied to the real one.
+    growth_only_paths = np.array([[1.0, 1.1, 1.21]])
+    post_cashflow_paths = np.array([[1.0, 0.9, 0.95]])
+    zero_inflation = np.zeros((1, 2))
+
+    table = percentile_table(
+        post_cashflow_paths,
+        initial_amount=1.0,
+        inflation_draws=zero_inflation,
+        growth_only_paths=growth_only_paths,
+    )
+
+    twrr_nominal = table["twrr_nominal"][50]
+    twrr_real = table["twrr_real"][50]
+
+    # Correct value: growth-only CAGR (10%), not the post-cashflow-contaminated
+    # figure that deflating `ending` (the post-cashflow balance) would produce.
+    assert twrr_real == pytest_approx(1.21 ** 0.5 - 1)
+    assert twrr_real == pytest_approx(twrr_nominal)
+
+
+def test_perpetual_withdrawal_rate_uses_arithmetic_mean_not_geometric_cagr():
+    # Single path, 2 annual periods: +50% then -50%. Growth factors 1.5, 0.5.
+    # Arithmetic mean of per-period returns [0.5, -0.5] is exactly 0.
+    # Per-period variance (population) = ((0.5-0)^2 + (-0.5-0)^2) / 2 = 0.25.
+    # Correct PWR = arithmetic_mean - 0.5*variance = 0 - 0.5*0.25 = -0.125.
+    #
+    # The buggy formula instead uses the per-path GEOMETRIC CAGR
+    # (0.75 ** 0.5 - 1 ~= -13.4%) as the "mu" term, double-applying the
+    # geometric/arithmetic variance-drag correction and producing a materially
+    # different (and wrong) PWR.
+    paths = np.array([[1.0, 1.5, 0.75]])
+
+    result = withdrawal_rates_by_percentile(paths, n_years=2)
+
+    pwr = result["perpetual_withdrawal_rate"][50]
+    assert pwr == pytest_approx(-0.125)
 
 
 def test_sharpe_uses_same_basis_numerator_and_denominator():

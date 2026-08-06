@@ -98,7 +98,13 @@ def apply_named_goals(
             # equivalently `starts_year - 1 <= year < ends_year`. Comparing `year` itself
             # against `starts_year` (i.e. `starts_year <= year < ends_year`) silently
             # drops the very first withdrawal/contribution year whenever starts_year >= 1
-            # (starts_year == 0 is unaffected since year is never negative).
+            # (starts_year == 0 is unaffected since year is never negative -- note
+            # this means starts_year=0 and starts_year=1 both resolve to the same
+            # `-1 <= year` / `0 <= year` lower bound and therefore collide on the
+            # same first transition (year=0, landing at balance-year 1). This is
+            # accepted as intentional: year 0 is the initial balance before any
+            # growth has occurred, so a goal cannot meaningfully start "in" year 0
+            # vs. year 1 -- both mean "active from the very first transition".)
             if goal["starts_year"] - 1 <= year < goal["ends_year"]:
                 sign = -1.0 if goal["is_withdrawal"] else 1.0
                 if goal.get("inflation_adjusted", False):
@@ -115,7 +121,13 @@ def apply_named_goals(
             # equivalently `starts_year - 1 <= year < ends_year`. Comparing `year` itself
             # against `starts_year` (i.e. `starts_year <= year < ends_year`) silently
             # drops the very first withdrawal/contribution year whenever starts_year >= 1
-            # (starts_year == 0 is unaffected since year is never negative).
+            # (starts_year == 0 is unaffected since year is never negative -- note
+            # this means starts_year=0 and starts_year=1 both resolve to the same
+            # `-1 <= year` / `0 <= year` lower bound and therefore collide on the
+            # same first transition (year=0, landing at balance-year 1). This is
+            # accepted as intentional: year 0 is the initial balance before any
+            # growth has occurred, so a goal cannot meaningfully start "in" year 0
+            # vs. year 1 -- both mean "active from the very first transition".)
             if goal["starts_year"] - 1 <= year < goal["ends_year"]:
                 goal_solvent_tracking[id(goal)] &= solvent
 
@@ -170,7 +182,13 @@ def build_cashflow_series(paths: np.ndarray, initial_amount: float, goals: list[
             # equivalently `starts_year - 1 <= year < ends_year`. Comparing `year` itself
             # against `starts_year` (i.e. `starts_year <= year < ends_year`) silently
             # drops the very first withdrawal/contribution year whenever starts_year >= 1
-            # (starts_year == 0 is unaffected since year is never negative).
+            # (starts_year == 0 is unaffected since year is never negative -- note
+            # this means starts_year=0 and starts_year=1 both resolve to the same
+            # `-1 <= year` / `0 <= year` lower bound and therefore collide on the
+            # same first transition (year=0, landing at balance-year 1). This is
+            # accepted as intentional: year 0 is the initial balance before any
+            # growth has occurred, so a goal cannot meaningfully start "in" year 0
+            # vs. year 1 -- both mean "active from the very first transition".)
             if goal["starts_year"] - 1 <= year < goal["ends_year"]:
                 sign = -1.0 if goal["is_withdrawal"] else 1.0
                 amount = _annualized_goal_amount(goal)
