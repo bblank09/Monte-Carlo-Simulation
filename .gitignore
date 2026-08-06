@@ -11,6 +11,7 @@ data/runs/*
 # which is slow/flaky. See CLAUDE.md's Data flow section.
 !data/processed/fund_universe.csv
 !data/processed/nav_panel.parquet
+!data/processed/sec_data_manifest.json
 .ipynb_checkpoints/
 __pycache__/
 conf/
@@ -18,7 +19,14 @@ webull_data_sdk.log
 .venv/
 .DS_Store
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.pyc
 
 .worktrees/
+frontend/node_modules/
+frontend/dist/
+frontend/tsconfig.tsbuildinfo
 frontend/test-results/
 frontend/playwright-report/
+frontend/playwright/.cache/

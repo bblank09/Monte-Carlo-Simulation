@@ -2,6 +2,7 @@ services:
   app:
     build: .
     ports:
+      # MC intentionally stays on 8001 so Backtest can use host port 8000.
       - "8001:8000"
     volumes:
       - mc-data:/app/data

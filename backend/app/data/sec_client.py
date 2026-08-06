@@ -6,9 +6,11 @@ import pandas as pd
 import requests
 from dotenv import load_dotenv
 
+from backend.app.core.config import settings
+
 load_dotenv(Path(__file__).resolve().parents[3] / ".env")
-API_KEY = os.environ.get("SEC_OPENDATA_API_KEY")
-BASE_URL = "https://api.sec.or.th"
+API_KEY = settings.sec_api_key or os.environ.get("SEC_OPENDATA_API_KEY")
+BASE_URL = settings.sec_api_base_url
 
 # Local cache, matching CLAUDE.md's documented data-flow ("SEC Open Data API ->
 # backend/app/data/ -> data/processed/nav_panel.parquet (cache) -> backend/app/engine/").
@@ -16,7 +18,7 @@ BASE_URL = "https://api.sec.or.th"
 # -- no live SEC API call happens on the request path (mirrors ../Backtest Portfolio
 # Webull:SEC OPENAI's backend/app/sec/cache.py pattern). The live SEC Open Data API is
 # slow and occasionally flaky, so a local cache keeps the app's hot path reproducible.
-DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "processed"
+DATA_DIR = Path(__file__).resolve().parents[3] / settings.processed_dir
 FUND_UNIVERSE_PATH = DATA_DIR / "fund_universe.csv"
 NAV_PANEL_PATH = DATA_DIR / "nav_panel.parquet"
 

@@ -22,14 +22,11 @@ SEC Open Data API -> `backend/app/data/` -> `data/processed/nav_panel.parquet`
 committed to git (like `../Backtest Portfolio Webull:SEC OPENAI`'s
 `data/sec/` cache) -- `backend/app/data/sec_client.py`'s `find_equity_funds()`
 and `get_daily_nav()` read these files directly and never call the live SEC
-API on the request path. This was copied from the sibling project's already-
-downloaded cache (same data source/universe) rather than re-fetched. To
-refresh with newer NAV data, re-run whatever pipeline populates the sibling
-project's `data/sec/normalized/daily_nav.parquet` and
-`data/sec/mvp_fund_universe.csv`, then copy them here (same schema: `proj_id`,
-`nav_date`, `nav_per_unit` for the NAV panel; `proj_id`, `fund_class_name`,
-`display_name`, `amc_name_th`, `policy_desc` for the universe) -- there is no
-dedicated download script in this project yet.
+API on the request path. The explicit refresh command is
+`scripts/sec_download_mvp.py`; it refreshes the NAV panel for the committed,
+curated fund universe and atomically replaces the cache only after validation.
+The normal application remains fully offline and reproducible from
+`data/processed/` alone.
 
 ## Landmines
 
@@ -55,6 +52,7 @@ dedicated download script in this project yet.
 - `npm --prefix frontend run dev` — Vite dev server
 - `npm --prefix frontend run build` — production build + frontend typecheck
 - `uvicorn backend.app.main:app --reload` — API dev server
+- `python3 scripts/sec_download_mvp.py` — explicit SEC cache refresh (requires `SEC_API_KEY` or `SEC_OPENDATA_API_KEY`)
 
 <!-- hyperresearch:start -->
 ## Research Base (hyperresearch) — Today is 2026-08-05

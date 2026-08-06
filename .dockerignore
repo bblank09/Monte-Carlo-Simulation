@@ -2,7 +2,7 @@ node_modules
 frontend/dist
 frontend/node_modules
 data/raw
-data/processed
+data/runs
 .git
 __pycache__
 *.pyc
