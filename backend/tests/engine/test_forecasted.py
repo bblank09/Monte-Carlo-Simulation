@@ -1,4 +1,5 @@
 import numpy as np
+
 from backend.app.engine.forecasted import simulate_forecasted
 
 

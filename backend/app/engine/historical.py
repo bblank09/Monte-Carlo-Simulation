@@ -31,15 +31,17 @@ def simulate_historical(returns_df: pd.DataFrame, weights: np.ndarray, config: d
 
 
 def _annual_portfolio_returns(returns_df: pd.DataFrame, weights: np.ndarray) -> np.ndarray:
-    annual_returns = returns_df.groupby(returns_df.index.year).apply(lambda g: (1 + g).prod() - 1)
-    return annual_returns.to_numpy() @ weights
+    dates = pd.DatetimeIndex(returns_df.index)
+    annual_log_returns = returns_df.groupby(dates.year).sum(numeric_only=True)
+    annual_simple_returns = np.expm1(annual_log_returns.to_numpy())
+    return annual_simple_returns @ weights
 
 
 def _monthly_portfolio_returns(returns_df: pd.DataFrame, weights: np.ndarray) -> np.ndarray:
-    monthly_returns = returns_df.groupby([returns_df.index.year, returns_df.index.month]).apply(
-        lambda g: (1 + g).prod() - 1
-    )
-    return monthly_returns.to_numpy() @ weights
+    dates = pd.DatetimeIndex(returns_df.index)
+    monthly_log_returns = returns_df.groupby([dates.year, dates.month]).sum(numeric_only=True)
+    monthly_simple_returns = np.expm1(monthly_log_returns.to_numpy())
+    return monthly_simple_returns @ weights
 
 
 def _block_bootstrap(annual_returns: np.ndarray, n_paths: int, n_years: int, block_years: int, rng: np.random.Generator) -> np.ndarray:

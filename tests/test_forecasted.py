@@ -1,9 +1,12 @@
 import numpy as np
 import pandas as pd
+import pytest
+
+from backend.app.engine.forecasted import simulate_forecasted
 
 
 def test_forecasted_garch_shape():
-    from forecasted_sim import simulate_forecasted
+    pytest.importorskip("arch")
     rng = np.random.default_rng(9)
     dates = pd.date_range("2015-01-01", periods=1500, freq="B")
     rets = pd.DataFrame(rng.normal(0.0003, 0.01, (1500, 2)), index=dates, columns=["A", "B"])
@@ -14,7 +17,6 @@ def test_forecasted_garch_shape():
 
 
 def test_forecasted_normal_shape_and_mean():
-    from forecasted_sim import simulate_forecasted
     mu = np.array([0.08, 0.05])
     sigma = np.array([[0.04, 0.006], [0.006, 0.0225]])
     weights = np.array([0.5, 0.5])

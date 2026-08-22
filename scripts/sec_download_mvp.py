@@ -18,14 +18,14 @@ from typing import Any
 
 import pandas as pd
 
-from backend.app.core.config import settings
+from backend.app.core.config import resolve_project_path, settings
 from backend.app.sec.client import SecOpenDataClient
 from backend.app.sec.endpoints import FUND_DAILY_NAV
 from backend.app.sec.normalizers import normalize_daily_nav_record, records
 
 START_DATE = date(2015, 1, 1)
 PAGE_SIZE = 100
-PROCESSED_DIR = settings.processed_dir
+PROCESSED_DIR = resolve_project_path(settings.processed_dir)
 FUND_UNIVERSE_PATH = PROCESSED_DIR / "fund_universe.csv"
 NAV_PANEL_PATH = PROCESSED_DIR / "nav_panel.parquet"
 MANIFEST_PATH = PROCESSED_DIR / "sec_data_manifest.json"

@@ -1,4 +1,5 @@
 import numpy as np
+
 from backend.app.engine.goals import glide_path_weights
 
 

@@ -19,6 +19,7 @@ export const mockFunds: FundSummary[] = [
     nav_gap_count: 1,
     nav_largest_gap_start: "2024-07",
     nav_largest_gap_end: "2024-10",
+    nav_available: true,
   },
   {
     proj_id: "M0209_2548",
@@ -38,6 +39,7 @@ export const mockFunds: FundSummary[] = [
     nav_gap_count: 1,
     nav_largest_gap_start: "2024-07",
     nav_largest_gap_end: "2024-10",
+    nav_available: true,
   },
   {
     proj_id: "M0088_2540",
@@ -57,6 +59,7 @@ export const mockFunds: FundSummary[] = [
     nav_gap_count: 0,
     nav_largest_gap_start: null,
     nav_largest_gap_end: null,
+    nav_available: true,
   },
   {
     proj_id: "M0154_2544",
@@ -76,6 +79,7 @@ export const mockFunds: FundSummary[] = [
     nav_gap_count: 0,
     nav_largest_gap_start: null,
     nav_largest_gap_end: null,
+    nav_available: true,
   },
   {
     proj_id: "M0301_2551",
@@ -95,6 +99,7 @@ export const mockFunds: FundSummary[] = [
     nav_gap_count: 0,
     nav_largest_gap_start: null,
     nav_largest_gap_end: null,
+    nav_available: true,
   },
 ];
 
@@ -236,6 +241,7 @@ export function mockSimulateResponse(request: SimulateRequest): SimulateResponse
       n_paths: request.n_paths,
       survived_count: survivedCount,
       survival_rate: survivedCount / request.n_paths,
+      terminal_positive_rate: survivedCount / request.n_paths,
       median_ending_balance: percentileTable.ending_balance[50],
       median_cagr: percentileTable.cagr[50],
       holdings: request.holdings,
@@ -257,6 +263,7 @@ export function mockSimulateResponse(request: SimulateRequest): SimulateResponse
     },
     risk: {
       correlation_and_returns: {
+        available: true,
         correlation: Object.fromEntries(
           request.holdings.map((a: { proj_id: string; weight: number }) => [
             a.proj_id,
@@ -276,15 +283,15 @@ export function mockSimulateResponse(request: SimulateRequest): SimulateResponse
     goals: request.multi_goal_enabled
       ? (() => {
           // Compute cashflows from goals
-          const cashflows_nominal = Array.from({ length: years + 1 }, () => 0);
-          const cashflows_present_dollar = Array.from({ length: years + 1 }, () => 0);
+              const cashflows_nominal = Array.from({ length: years + 1 }, () => 0);
+              const cashflows_present_dollar = Array.from({ length: years + 1 }, () => 0);
 
           if (request.goals) {
             for (const goal of request.goals) {
               const frequency_years = goal.frequency === "monthly" ? 1 / 12 : goal.frequency === "quarterly" ? 0.25 : 1;
               const sign = goal.is_withdrawal ? -1 : 1;
 
-              for (let y = goal.starts_year; y <= Math.min(goal.ends_year, years); y++) {
+              for (let y = Math.max(1, goal.starts_year); y <= Math.min(goal.ends_year, years); y++) {
                 const annual_contribution = sign * goal.amount / frequency_years;
                 cashflows_nominal[y] = (cashflows_nominal[y] ?? 0) + annual_contribution;
                 // Present dollar: discount back at ~2.5% inflation
@@ -321,6 +328,7 @@ export function mockSimulateResponse(request: SimulateRequest): SimulateResponse
 
           const goalsObj: Record<string, unknown> = {
             summary: (request.goals ?? []).map((g: { purpose: string }) => ({ purpose: g.purpose, success_rate: 0.94 })),
+            years: Array.from({ length: years + 1 }, (_, index) => index),
             cashflows_nominal,
             cashflows_present_dollar,
           };
@@ -330,7 +338,14 @@ export function mockSimulateResponse(request: SimulateRequest): SimulateResponse
           return goalsObj;
         })()
       : null,
-    run_config: request as unknown as Record<string, unknown>,
+    run_config: {
+      ...(request as unknown as Record<string, unknown>),
+      data_provenance: {
+        asset_returns: "Mock fixture",
+        asset_data_range: null,
+        historical_inflation: { source: "Mock fixture", vintage: "Mock fixture", observations: 0, used: request.inflation_model === "historical" },
+      },
+    },
   };
 
   return response;

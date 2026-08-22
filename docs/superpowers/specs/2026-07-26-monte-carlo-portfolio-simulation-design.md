@@ -1,5 +1,9 @@
 # Monte Carlo Portfolio Simulation (Webull TH × SEC Open Data) — Design Spec
 
+> **Archived / superseded:** this notebook-era design describes the former mixed
+> Webull/yfinance/US-ticker scope. The shipped webapp contract is SEC-only and is
+> documented in `README.md`, `CLAUDE.md`, and the 2026-08-04 implementation reference.
+
 **Date:** 2026-07-26
 **Course context:** ต่อยอดจาก CQF Module 1-2 (ดู `learn.cqf/CQF Module 1-2 Master Overview.md`)
 **Goal:** สร้าง 3 Jupyter Notebook ที่ลอกโครงสร้าง input/output ของ 3 เครื่องมือใน [Portfolio Visualizer](https://www.portfoliovisualizer.com/analysis) หมวด "Monte Carlo Simulation" มาทั้งหมด แต่ implement ด้วยสมการที่มาจาก CQF Module 1-2 เอง ทีละขั้น พร้อมอธิบายที่มา และ benchmark ผลลัพธ์กับ Portfolio Visualizer จริง

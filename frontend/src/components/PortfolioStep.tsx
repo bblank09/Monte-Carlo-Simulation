@@ -82,26 +82,27 @@ export function PortfolioStep({ funds, active, onHoldingsChange, onContinue }: P
   const [amcFilter, setAmcFilter] = useState<Set<string>>(new Set());
   const [categoryFilter, setCategoryFilter] = useState<Set<string>>(new Set());
   const seededRef = useRef(false);
+  const selectableFunds = useMemo(() => funds.filter((fund) => fund.nav_available !== false), [funds]);
 
   const fundsById = useMemo(() => new Map(funds.map((fund) => [fund.proj_id, fund])), [funds]);
 
   const amcFacets = useMemo(
-    () => buildFacets(funds, "amc_name_en", categoryFilter, "policy_desc"),
-    [funds, categoryFilter]
+    () => buildFacets(selectableFunds, "amc_name_en", categoryFilter, "policy_desc"),
+    [selectableFunds, categoryFilter]
   );
   const categoryFacets = useMemo(
-    () => buildFacets(funds, "policy_desc", amcFilter, "amc_name_en"),
-    [funds, amcFilter]
+    () => buildFacets(selectableFunds, "policy_desc", amcFilter, "amc_name_en"),
+    [selectableFunds, amcFilter]
   );
 
   const filteredFunds = useMemo(
     () =>
-      funds.filter((fund) => {
+      selectableFunds.filter((fund) => {
         if (amcFilter.size && !amcFilter.has(fund.amc_name_en)) return false;
         if (categoryFilter.size && !categoryFilter.has(fund.policy_desc)) return false;
         return true;
       }),
-    [funds, amcFilter, categoryFilter]
+    [selectableFunds, amcFilter, categoryFilter]
   );
 
   function toggleFilter(setter: (updater: (current: Set<string>) => Set<string>) => void, value: string) {
@@ -119,11 +120,11 @@ export function PortfolioStep({ funds, active, onHoldingsChange, onContinue }: P
   }
 
   useEffect(() => {
-    if (seededRef.current || funds.length < 2) return;
+    if (seededRef.current || selectableFunds.length < 2) return;
     seededRef.current = true;
-    seedRows(funds.slice(0, 2).map((fund, index) => ({ fund, weight: index === 0 ? 60 : 40 })));
+    seedRows(selectableFunds.slice(0, 2).map((fund, index) => ({ fund, weight: index === 0 ? 60 : 40 })));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [funds]);
+  }, [selectableFunds]);
 
   function commit(nextRows: Row[]) {
     setRows(nextRows);
@@ -196,8 +197,8 @@ export function PortfolioStep({ funds, active, onHoldingsChange, onContinue }: P
   }
 
   function loadExample() {
-    if (funds.length < 2) return;
-    seedRows(funds.slice(0, 2).map((fund, index) => ({ fund, weight: index === 0 ? 60 : 40 })));
+    if (selectableFunds.length < 2) return;
+    seedRows(selectableFunds.slice(0, 2).map((fund, index) => ({ fund, weight: index === 0 ? 60 : 40 })));
   }
 
   const committedRows = rows.filter((row) => row.projId);
@@ -226,7 +227,6 @@ export function PortfolioStep({ funds, active, onHoldingsChange, onContinue }: P
           <span className="footnote" style={{ margin: 0 }}>First time here?</span>
           <button className="link-btn" onClick={loadExample} type="button">Load an example portfolio</button>
         </div>
-
         <div className="holdings-table">
           <div className="holdings-head">
             <div>SEC Fund</div>

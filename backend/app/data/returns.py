@@ -37,6 +37,12 @@ def build_price_panel(nav_df: pd.DataFrame) -> pd.DataFrame:
     ordinary reporting-calendar noise; a longer run is a genuine NAV gap
     and raises NavGapError rather than being silently interpolated.
     """
+    # SEC refreshes are expected to deduplicate these keys, but the committed
+    # cache is an input boundary and must remain safe if an older refresh or a
+    # hand-built fixture contains repeated observations. Keep the last record
+    # deterministically rather than allowing pandas.pivot() to fail with an
+    # opaque reshape error.
+    nav_df = nav_df.drop_duplicates(["proj_id", "nav_date"], keep="last")
     panel = nav_df.pivot(index="nav_date", columns="proj_id", values="last_val").sort_index()
 
     for proj_id in panel.columns:
@@ -62,8 +68,8 @@ def build_price_panel(nav_df: pd.DataFrame) -> pd.DataFrame:
                 gap_dates = run.index
                 raise NavGapError(
                     f"NAV_GAP: fund {proj_id!r} is missing {len(gap_dates)} consecutive "
-                    f"observation(s) between {gap_dates[0].date()} and {gap_dates[-1].date()} "
-                    f"(within its own {first_valid.date()}..{last_valid.date()} history) -- "
+                    f"observation(s) between {pd.Timestamp(gap_dates[0]).date()} and {pd.Timestamp(gap_dates[-1]).date()} "
+                    f"(within its own {pd.Timestamp(first_valid).date()}..{pd.Timestamp(last_valid).date()} history) -- "
                     f"exceeds the {MAX_TOLERATED_GAP_RUN}-day tolerance for normal reporting-"
                     "calendar noise. NAV gaps are hard errors and are never forward-filled "
                     "or interpolated."
@@ -75,7 +81,15 @@ def build_price_panel(nav_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def log_returns(price_panel: pd.DataFrame) -> pd.DataFrame:
-    return np.log(price_panel / price_panel.shift(1)).dropna()
+    shifted = price_panel.shift(1)
+    values = np.log(price_panel.to_numpy() / shifted.to_numpy())
+    return pd.DataFrame(values, index=price_panel.index, columns=price_panel.columns).dropna()
+
+
+def log_to_simple_returns(log_returns_df: pd.DataFrame) -> pd.DataFrame:
+    """Convert a log-return frame to simple returns without changing its index."""
+    values = np.expm1(log_returns_df.to_numpy())
+    return pd.DataFrame(values, index=log_returns_df.index, columns=log_returns_df.columns)
 
 
 def estimate_mu_sigma(returns_df: pd.DataFrame, periods_per_year: int = 252) -> tuple[np.ndarray, np.ndarray]:

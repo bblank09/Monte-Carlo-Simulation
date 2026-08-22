@@ -1,4 +1,5 @@
 import numpy as np
+
 from backend.app.engine.inflation import simulate_inflation
 
 

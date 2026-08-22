@@ -32,7 +32,10 @@ The normal application remains fully offline and reproducible from
 
 - `pandas>=3.0` is a hard floor. pandas 2.2.3 has a silent data-corruption
   bug at wide-panel scale. Do not downgrade.
-- NAV gaps are hard errors. Never forward-fill or interpolate across a gap.
+- Genuine extended interior NAV gaps are hard errors and are never forward-filled
+  or interpolated. A bounded isolated missing date caused only by cross-fund
+  calendar misalignment is tolerated and forward-filled; the threshold is
+  explicit in `backend/app/data/returns.py`.
 - "Is this date range usable" is computed server-side only. Never
   re-derive it client-side.
 - Project directory name contains `:` (`Monte Carlo Simulation Webull:SEC
@@ -42,8 +45,16 @@ The normal application remains fully offline and reproducible from
   `asset_paths @ weights`, which is a drifting-weight computation with no
   rebalancing, unlike the other 3 models (which bootstrap
   already-portfolio-weighted annual returns, implicitly rebalancing every
-  draw). The Rebalancing Frequency parameter must apply consistently
-  across all 4 models — see `engine/statistical.py`.
+  draw). The shipped rebalancing contract is deliberately narrower than the
+  original PV parity plan: only Statistical Normal supports explicit
+  rebalancing; Historical, Forecasted, Parameterized, and Statistical GARCH
+  requests must use `none`. Do not expose a frequency selector for unsupported
+  models until their portfolio-level semantics are implemented.
+- Parameterized Returns are assumption-only and do not require NAV history.
+  Historical holding diagnostics are returned as unavailable for that model;
+  do not add a hidden data dependency back into the request path.
+- Fund availability is computed server-side from the cached NAV observation
+  count. The picker must not reimplement the threshold in a different way.
 
 ## Commands
 

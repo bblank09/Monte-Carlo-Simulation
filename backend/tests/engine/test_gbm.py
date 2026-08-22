@@ -1,4 +1,5 @@
 import numpy as np
+
 from backend.app.engine.gbm import simulate_gbm_paths
 
 

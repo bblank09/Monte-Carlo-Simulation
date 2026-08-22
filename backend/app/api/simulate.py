@@ -1,34 +1,61 @@
 import json
 import logging
 import math
+import os
+import shutil
+import tempfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+import pandas as pd
 from fastapi import APIRouter, Request
 
+from backend.app.core.config import resolve_project_path, settings
 from backend.app.core.errors import AppHTTPException
 from backend.app.core.limiter import limiter
 from backend.app.data.returns import NavGapError, build_price_panel, log_returns
-from backend.app.data.sec_client import get_daily_nav
+from backend.app.data.sec_client import MIN_USABLE_NAV_OBSERVATIONS, get_daily_nav
 from backend.app.domain.enums import ErrorCode
 from backend.app.domain.schemas import SimulateRequest, SimulateResponse
 from backend.app.engine.orchestrator import run_simulation
 
 router = APIRouter()
-RUNS_DIR = Path("data/runs")
+RUNS_DIR = resolve_project_path(settings.runs_dir)
+MAX_PERSISTED_RUNS = settings.max_persisted_runs
 logger = logging.getLogger("app.simulate")
 
 
-def load_nav_returns(proj_ids: list[str], simulation_period_years: int):
+def nav_date_window(
+    as_of: pd.Timestamp,
+    simulation_period_years: int,
+    use_full_history: bool | None,
+) -> tuple[str, str]:
+    """Return the NAV query window implied by the historical-data setting."""
+    end = as_of.normalize()
+    start = (
+        pd.Timestamp("2000-01-01")
+        if use_full_history is not False
+        else end - pd.DateOffset(years=simulation_period_years)
+    )
+    return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+
+
+def load_nav_returns(
+    proj_ids: list[str],
+    simulation_period_years: int,
+    use_full_history: bool | None = True,
+):
     """Fetch NAV history for the requested funds and return daily log returns. Raises a
     hard error (never interpolates) if any requested fund has no usable NAV history."""
-    import pandas as pd
+    start_date, end_date = nav_date_window(
+        pd.Timestamp.today(), simulation_period_years, use_full_history
+    )
     frames = []
     for proj_id in proj_ids:
-        nav_df = get_daily_nav(proj_id, "2000-01-01", pd.Timestamp.today().strftime("%Y-%m-%d"))
+        nav_df = get_daily_nav(proj_id, start_date, end_date)
         if nav_df.empty:
             raise AppHTTPException(
                 status_code=503,
@@ -45,7 +72,24 @@ def load_nav_returns(proj_ids: list[str], simulation_period_years: int):
             detail=str(exc),
             code=ErrorCode.INSUFFICIENT_NAV_HISTORY,
         ) from exc
-    return log_returns(panel)
+    returns = log_returns(panel)
+    minimum_returns = max(2, MIN_USABLE_NAV_OBSERVATIONS - 1)
+    insufficient = {
+        proj_id: int(returns[proj_id].notna().sum()) if proj_id in returns.columns else 0
+        for proj_id in proj_ids
+        if proj_id not in returns.columns or int(returns[proj_id].notna().sum()) < minimum_returns
+    }
+    if insufficient:
+        details = ", ".join(f"{proj_id}: {count}" for proj_id, count in insufficient.items())
+        raise AppHTTPException(
+            status_code=422,
+            detail=(
+                f"Insufficient cached NAV history ({details} daily returns); "
+                f"at least {minimum_returns} daily returns ({MIN_USABLE_NAV_OBSERVATIONS} NAV observations) are required."
+            ),
+            code=ErrorCode.INSUFFICIENT_NAV_HISTORY,
+        )
+    return returns
 
 
 @router.post("/simulate", response_model=SimulateResponse)
@@ -54,11 +98,21 @@ def simulate(request: Request, simulation_request: SimulateRequest) -> SimulateR
     proj_ids = [h.proj_id for h in simulation_request.holdings]
     started = time.monotonic()
     try:
-        returns_df = load_nav_returns(proj_ids, simulation_request.simulation_period_years)
+        if simulation_request.simulation_model == "parameterized":
+            # Parameterized paths are driven entirely by user assumptions. Historical
+            # NAV is intentionally optional; risk diagnostics will be marked unavailable
+            # instead of blocking a valid assumption-only run.
+            returns_df = pd.DataFrame(columns=proj_ids)
+        else:
+            returns_df = load_nav_returns(
+                proj_ids,
+                simulation_request.simulation_period_years,
+                simulation_request.use_full_history,
+            )
         response = run_simulation(simulation_request, returns_df)
     except AppHTTPException:
         raise
-    except (KeyError, ValueError) as exc:
+    except (KeyError, ValueError, ArithmeticError, FloatingPointError) as exc:
         raise AppHTTPException(
             status_code=422,
             detail=str(exc),
@@ -107,15 +161,32 @@ def utc_now() -> datetime:
 
 def persist_run(run_id: str, request: SimulateRequest, result: dict[str, Any]) -> None:
     run_dir = RUNS_DIR / run_id
-    run_dir.mkdir(parents=True, exist_ok=False)
-    (run_dir / "request.json").write_text(
-        json.dumps(request.model_dump(mode="json"), indent=2, ensure_ascii=False, allow_nan=False),
-        encoding="utf-8",
-    )
-    (run_dir / "result.json").write_text(
-        json.dumps(to_jsonable(result), indent=2, ensure_ascii=False, allow_nan=False),
-        encoding="utf-8",
-    )
+    RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    temporary_dir = Path(tempfile.mkdtemp(prefix=f".{run_id}.tmp-", dir=RUNS_DIR))
+    try:
+        (temporary_dir / "request.json").write_text(
+            json.dumps(request.model_dump(mode="json"), indent=2, ensure_ascii=False, allow_nan=False),
+            encoding="utf-8",
+        )
+        (temporary_dir / "result.json").write_text(
+            json.dumps(to_jsonable(result), indent=2, ensure_ascii=False, allow_nan=False),
+            encoding="utf-8",
+        )
+        os.replace(temporary_dir, run_dir)
+    except Exception:
+        shutil.rmtree(temporary_dir, ignore_errors=True)
+        raise
+    _prune_persisted_runs()
+
+
+def _prune_persisted_runs() -> None:
+    """Keep generated run artifacts bounded without touching non-run data."""
+    if not RUNS_DIR.is_dir():
+        return
+    run_dirs = [path for path in RUNS_DIR.iterdir() if path.is_dir() and path.name.startswith("run_")]
+    run_dirs.sort(key=lambda path: (path.stat().st_mtime_ns, path.name), reverse=True)
+    for stale_dir in run_dirs[MAX_PERSISTED_RUNS:]:
+        shutil.rmtree(stale_dir)
 
 
 def to_jsonable(value: Any) -> Any:

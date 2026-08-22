@@ -8,6 +8,7 @@ export interface SimulateRequest {
   initial_amount: number;
   simulation_period_years: number;
   tax_treatment: "pre_tax" | "after_tax";
+  tax_rate?: number;
   simulation_model: "historical" | "forecasted" | "statistical" | "parameterized";
   n_paths: number;
   seed?: number;
@@ -21,12 +22,11 @@ export interface SimulateRequest {
   degrees_of_freedom?: number;
   expected_return?: number;
   expected_volatility?: number;
-  /** Single-cashflow controls; multiple goals remain a backend-only compatibility shape. */
-  cashflow_mode?: "none" | "contribute" | "withdraw_fixed" | "withdraw_percent" | "rolling_average_spending" | "geometric_spending" | "withdraw_life_expectancy";
+  /** Cashflow modes implemented by the backend engine. */
+  cashflow_mode?: "none" | "contribute" | "withdraw_fixed" | "withdraw_percent";
   cashflow_amount?: number;
   cashflow_inflation_adjusted?: boolean;
   cashflow_frequency?: "monthly" | "quarterly" | "annually";
-  /** Legacy API compatibility; Parameters no longer exposes multiple goals. */
   multi_goal_enabled?: boolean;
   goals?: NamedGoal[];
   years_to_retirement?: number;
@@ -80,4 +80,8 @@ export interface FundSummary {
   nav_gap_count: number | null;
   nav_largest_gap_start: string | null;
   nav_largest_gap_end: string | null;
+  nav_available: boolean;
+  nav_observations?: number | null;
+  nav_min_observations?: number;
+  nav_availability_reason?: string | null;
 }

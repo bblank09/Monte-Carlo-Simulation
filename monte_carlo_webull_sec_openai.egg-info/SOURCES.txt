@@ -35,8 +35,10 @@ backend/app/sec/endpoints.py
 backend/app/sec/normalizers.py
 backend/tests/__init__.py
 backend/tests/test_api_versioning.py
+backend/tests/test_approved_fixes.py
 backend/tests/test_ci_workflow.py
 backend/tests/test_dockerfile.py
+backend/tests/test_engine_manual_verification_fixes.py
 backend/tests/test_error_handling.py
 backend/tests/test_rate_limiting.py
 backend/tests/test_repository_contract.py

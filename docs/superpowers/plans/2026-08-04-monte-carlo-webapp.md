@@ -1,5 +1,10 @@
 # Monte Carlo Simulation Webapp Implementation Plan
 
+> **Historical plan note (2026-08-14):** this plan is retained as implementation
+> history, not as the current product contract. The shipped code rejects the three
+> formerly-described cashflow fallbacks, uses a sourced/versioned CPI fallback, and
+> exposes only the supported fields documented in `README.md` and `CLAUDE.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the Monte Carlo Simulation web app — FastAPI backend promoting the existing `tests/*.py` engine plus new engine modules, and a React+TS frontend copying Backtest Portfolio's 3-step wizard shell and chart primitives with entirely new Parameters/Results content.

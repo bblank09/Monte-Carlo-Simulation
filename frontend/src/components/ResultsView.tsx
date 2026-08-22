@@ -26,6 +26,7 @@ interface RunConfigData {
   simulation_period_years?: number;
   initial_amount?: number;
   tax_treatment?: string;
+  tax_rate?: number;
   holdings?: { proj_id: string; weight: number }[];
   n_paths?: number;
   seed?: number;
@@ -45,6 +46,11 @@ interface RunConfigData {
   expected_return?: number;
   expected_volatility?: number;
   sequence_of_returns_risk?: number;
+  data_provenance?: {
+    asset_returns?: string;
+    asset_data_range?: { start: string; end: string } | null;
+    historical_inflation?: { source?: string; vintage?: string; observations?: number; used?: boolean };
+  };
 }
 
 function pctString(value: number, digits = 2) {
@@ -143,11 +149,15 @@ export function ResultsView({ result }: Props) {
         </button>
       </div>
 
-      <nav className="resultTabs" aria-label="Simulation output tabs">
+      <nav className="resultTabs" aria-label="Simulation output tabs" role="tablist">
         {tabs.map((tab) => (
           <button
             key={tab.id}
+            aria-controls={`simulation-panel-${tab.id}`}
+            aria-selected={tab.id === activeTab}
             className={tab.id === activeTab ? "resultTab active" : "resultTab"}
+            id={`simulation-tab-${tab.id}`}
+            role="tab"
             onClick={() => setActiveTab(tab.id)}
             type="button"
           >
@@ -156,13 +166,20 @@ export function ResultsView({ result }: Props) {
         ))}
       </nav>
 
-      {activeTab === "overview" && <OverviewTab result={result} />}
-      {activeTab === "growth" && <GrowthTab result={result} />}
-      {activeTab === "distribution" && <DistributionTab result={result} />}
-      {activeTab === "metrics" && <MetricsTab result={result} />}
-      {activeTab === "risk" && <RiskTab result={result} />}
-      {activeTab === "goals" && result.goals && <GoalsTab goals={result.goals} />}
-      {activeTab === "report" && <ReportTab result={result} />}
+      <div
+        aria-labelledby={`simulation-tab-${activeTab}`}
+        id={`simulation-panel-${activeTab}`}
+        role="tabpanel"
+        tabIndex={0}
+      >
+        {activeTab === "overview" && <OverviewTab result={result} />}
+        {activeTab === "growth" && <GrowthTab result={result} />}
+        {activeTab === "distribution" && <DistributionTab result={result} />}
+        {activeTab === "metrics" && <MetricsTab result={result} />}
+        {activeTab === "risk" && <RiskTab result={result} />}
+        {activeTab === "goals" && result.goals && <GoalsTab goals={result.goals} />}
+        {activeTab === "report" && <ReportTab result={result} />}
+      </div>
     </section>
   );
 }
@@ -173,9 +190,15 @@ interface OverviewData {
   survived_count: number;
   n_paths: number;
   survival_rate: number;
+  terminal_positive_rate?: number;
   median_ending_balance: number;
   median_cagr: number;
   holdings: { proj_id: string; weight: number }[];
+  historical_data_range?: { start: string; end: string } | null;
+}
+
+function terminalDepletionRate(overview: OverviewData) {
+  return 1 - (overview.terminal_positive_rate ?? overview.survival_rate);
 }
 
 function OverviewTab({ result }: { result: SimulateResponse }) {
@@ -193,7 +216,7 @@ function OverviewTab({ result }: { result: SimulateResponse }) {
   const p10 = metrics.percentile_table.ending_balance["10"];
   const p90 = metrics.percentile_table.ending_balance["90"];
   const samplingError = percentError(overview.survived_count, overview.n_paths);
-  const survivalLabel = cashflowRun ? "Withdrawal survival rate" : "Positive ending balance rate";
+  const survivalLabel = cashflowRun ? "Full-horizon withdrawal survival rate" : "Full-horizon survival rate";
   return (
     <div className="tabStack">
       <section className="chartPanel">
@@ -218,7 +241,10 @@ function OverviewTab({ result }: { result: SimulateResponse }) {
               ["Simulation model", SIMULATION_MODEL_LABELS[runConfig.simulation_model ?? ""] ?? "Monte Carlo"],
               ["Horizon", `${runConfig.simulation_period_years ?? "—"} years`],
               ["Initial amount", money(runConfig.initial_amount ?? 0)],
+              ["Tax treatment", `${humanizeLabel(runConfig.tax_treatment ?? "not specified")}${runConfig.tax_rate == null ? "" : ` · ${pctString(runConfig.tax_rate)}`}`],
               ["Inflation", humanizeLabel(runConfig.inflation_model ?? "not specified")],
+              ["Historical data range", overview.historical_data_range ? `${overview.historical_data_range.start} to ${overview.historical_data_range.end}` : "Not used by this model"],
+              ["Historical inflation source", runConfig.data_provenance?.historical_inflation?.source ?? "Not recorded"],
               ["Cashflow", cashflowRun ? `${humanizeLabel(runConfig.cashflow_mode ?? "")} · ${humanizeLabel(runConfig.cashflow_frequency ?? "")}` : "None"],
               ["Rebalancing", humanizeLabel(runConfig.rebalancing ?? "not specified")],
             ],
@@ -429,7 +455,7 @@ function DistributionTab({ result }: { result: SimulateResponse }) {
   return (
     <div className="tabStack">
       <div className="metricGrid">
-        <MetricCard label="Probability of depletion" value={pctString(1 - overview.survival_rate)} tone={overview.survival_rate < 0.5 ? "negative" : undefined} sub="Full-horizon terminal outcome" />
+          <MetricCard label="Probability of terminal depletion" value={pctString(terminalDepletionRate(overview))} tone={terminalDepletionRate(overview) > 0.5 ? "negative" : undefined} sub="Ending balance at or below zero" />
         <MetricCard label="P10 ending balance" value={money(p10)} sub="Downside case" />
         <MetricCard label="P90 − P10 spread" value={money(p90 - p10)} sub="Terminal outcome dispersion" />
         <MetricCard label="Terminal loss probability" value={pctString(terminalLossProbability)} sub="Ending balance below initial amount" />
@@ -609,6 +635,8 @@ function MetricsTab({ result }: { result: SimulateResponse }) {
 
 interface RiskData {
   correlation_and_returns: {
+    available?: boolean;
+    reason?: string;
     correlation: Record<string, Record<string, number | null>>;
     stats: Record<string, { cagr: number; expected_return: number; volatility: number }>;
   };
@@ -738,9 +766,15 @@ function RiskTab({ result }: { result: SimulateResponse }) {
       <div className="metricGrid">
         <MetricCard label="Terminal loss VaR (90%)" value={money(risk.value_at_risk)} sub="Loss relative to initial amount" />
         <MetricCard label="Terminal expected shortfall (90%)" value={money(risk.expected_shortfall)} sub="Average loss beyond VaR" />
-        <MetricCard label="Terminal depletion" value={pctString(1 - overview.survival_rate)} tone={overview.survival_rate < 0.5 ? "negative" : undefined} />
+        <MetricCard label="Terminal depletion" value={pctString(terminalDepletionRate(overview))} tone={terminalDepletionRate(overview) > 0.5 ? "negative" : undefined} />
         <MetricCard label="P90 max drawdown" value={pctString((result.metrics as unknown as MetricsData).percentile_table.max_drawdown["90"])} sub="Less severe end of drawdown distribution" />
       </div>
+      {risk.correlation_and_returns.available === false ? (
+        <div className="notePanel">
+          <h3>Historical holding diagnostics unavailable</h3>
+          <p>{risk.correlation_and_returns.reason ?? "This model does not require historical NAV diagnostics."}</p>
+        </div>
+      ) : null}
       <div className="panelGrid">
         <section className="tablePanel">
           <h3>Correlation Matrix</h3>
@@ -800,6 +834,7 @@ interface GlidePath {
 
 interface GoalsData {
   summary: { purpose: string; success_rate: number }[];
+  years?: number[];
   cashflows_nominal?: number[];
   cashflows_present_dollar?: number[];
   glide_path?: GlidePath;
@@ -812,18 +847,19 @@ function GoalsTab({ goals }: { goals: Record<string, unknown> }) {
   const summary = data.summary ?? [];
 
   const hasCashflows = !!(data.cashflows_nominal && data.cashflows_nominal.length);
+  const cashflowYears = data.years ?? (data.cashflows_nominal ?? []).map((_, index) => index);
   const cashflowSeries: ChartSeries[] = hasCashflows
     ? [
         {
           label: "Nominal",
           color: "var(--accent)",
-          points: (data.cashflows_nominal ?? []).map((y, x) => ({ x, y })),
+          points: (data.cashflows_nominal ?? []).map((y, x) => ({ x: cashflowYears[x] ?? x, y })),
         },
         {
           label: "Present dollar",
           color: "var(--success)",
           dashed: true,
-          points: (data.cashflows_present_dollar ?? []).map((y, x) => ({ x, y })),
+          points: (data.cashflows_present_dollar ?? []).map((y, x) => ({ x: cashflowYears[x] ?? x, y })),
         },
       ]
     : [];
@@ -920,12 +956,14 @@ function portfolioSpecRows(runConfig: RunConfigData): TableSection {
       ["Simulation Period (years)", String(runConfig.simulation_period_years ?? "")],
       ["Simulation Paths", String(runConfig.n_paths ?? "")],
       ["Seed", runConfig.seed == null ? "Random" : String(runConfig.seed)],
-      ["Tax Treatment", humanizeLabel(runConfig.tax_treatment ?? "")],
+      ["Tax Treatment", `${humanizeLabel(runConfig.tax_treatment ?? "")}${runConfig.tax_rate == null ? "" : ` · ${pctString(runConfig.tax_rate)}`}`],
       ["Simulation Model", SIMULATION_MODEL_LABELS[runConfig.simulation_model ?? ""] ?? runConfig.simulation_model ?? ""],
       ["Inflation Model", humanizeLabel(runConfig.inflation_model ?? "")],
       ["Cashflow Mode", humanizeLabel(runConfig.cashflow_mode ?? "none")],
       ["Cashflow Frequency", humanizeLabel(runConfig.cashflow_frequency ?? "")],
       ["Rebalancing", humanizeLabel(runConfig.rebalancing ?? "")],
+      ["Historical inflation source", runConfig.data_provenance?.historical_inflation?.source ?? "Not recorded"],
+      ["Historical inflation vintage", runConfig.data_provenance?.historical_inflation?.vintage ?? "Not recorded"],
       ...(runConfig.expected_return == null ? [] : [["Expected Return", pctString(runConfig.expected_return)]]),
       ...(runConfig.expected_volatility == null ? [] : [["Expected Volatility", pctString(runConfig.expected_volatility)]]),
       ...(runConfig.distribution == null ? [] : [["Return Distribution", humanizeLabel(runConfig.distribution)]]),
@@ -995,6 +1033,9 @@ function reportMarkdown(result: SimulateResponse) {
   const risk = result.risk as unknown as RiskData;
   const overview = result.overview as unknown as OverviewData;
   const ids = Object.keys(risk.correlation_and_returns.correlation);
+  const correlationNarrative = risk.correlation_and_returns.available === false
+    ? (risk.correlation_and_returns.reason ?? "Historical holding diagnostics were not required for this model.")
+    : `Correlation was computed across ${ids.length} holding(s): ${ids.join(", ")}. See the Risk & Correlation tab for the full pairwise matrix.`;
 
   const sections: { title: string; body: string }[] = [
     { title: "1. Research question", body: reportNarrative(runConfig) },
@@ -1006,7 +1047,7 @@ function reportMarkdown(result: SimulateResponse) {
       title: "6. Distribution analysis",
       body: `${overview.survived_count} of ${overview.n_paths} simulated paths (${pctString(overview.survival_rate)}) remained positive through the full horizon. The ending balance spread runs from ${money(metrics.percentile_table.ending_balance["10"])} at the 10th percentile to ${money(metrics.percentile_table.ending_balance["90"])} at the 90th percentile.`,
     },
-    { title: "7. Diversification and correlation", body: `Correlation was computed across ${ids.length} holding(s): ${ids.join(", ")}. See the Risk & Correlation tab for the full pairwise matrix.` },
+    { title: "7. Diversification and correlation", body: correlationNarrative },
     { title: "8. Simulation diagnostics", body: markdownTable(simulationDiagnosticsRows(overview, runConfig)) },
     { title: "Formula reference", body: markdownTable(FORMULA_ROWS) },
     {
@@ -1118,11 +1159,17 @@ function ReportTab({ result }: { result: SimulateResponse }) {
         </ReportSection>
 
         <ReportSection title="7. Diversification and correlation">
-          <p>Pairwise correlation across all holdings, reused from the Risk &amp; Correlation tab:</p>
-          <CorrelationMatrix
-            ids={Object.keys(risk.correlation_and_returns.correlation)}
-            correlation={risk.correlation_and_returns.correlation}
-          />
+          {risk.correlation_and_returns.available === false ? (
+            <p>{risk.correlation_and_returns.reason ?? "Historical holding diagnostics were not required for this model."}</p>
+          ) : (
+            <>
+              <p>Pairwise correlation across all holdings, reused from the Risk &amp; Correlation tab:</p>
+              <CorrelationMatrix
+                ids={Object.keys(risk.correlation_and_returns.correlation)}
+                correlation={risk.correlation_and_returns.correlation}
+              />
+            </>
+          )}
         </ReportSection>
 
         <ReportSection title="Formula reference">
