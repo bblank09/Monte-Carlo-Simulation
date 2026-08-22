@@ -97,12 +97,13 @@ export function App() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<AppError | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
-  const [theme, setTheme] = useState<"light" | "dark">(() => (localStorage.getItem("mc-theme") === "dark" ? "dark" : "light"));
 
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem("mc-theme", theme);
-  }, [theme]);
+    // Dark is the only supported theme now -- no toggle, no stored
+    // preference. Still set explicitly so :root[data-theme="dark"] wins
+    // over a light prefers-color-scheme system setting.
+    document.documentElement.setAttribute("data-theme", "dark");
+  }, []);
 
   useEffect(() => {
     void loadFunds();
@@ -234,9 +235,6 @@ export function App() {
           {navAsOf ? <span className="tag nav-as-of">NAV data as of {formatNavDate(navAsOf)}</span> : null}
         </div>
         <Stepper currentStep={stepIndex} unlockedStep={unlockedStep} onStepClick={goToStep} />
-        <button className="theme-toggle" onClick={() => setTheme((current) => (current === "light" ? "dark" : "light"))} type="button">
-          Toggle theme
-        </button>
       </header>
 
       <div className="main">
@@ -294,7 +292,7 @@ export function App() {
       </div>
 
       <footer className="app-footer">
-        <img alt="Supachok Julaupay signature mark" className="app-footer-mark" src={theme === "dark" ? "/brand/author-logo-dark.png" : "/brand/author-logo-light.png"} />
+        <img alt="Supachok Julaupay signature mark" className="app-footer-mark" src="/brand/author-logo-dark.png" />
         <div className="app-footer-text">
           <span className="app-footer-name">Supachok Julaupay</span>
           <a href="https://github.com/bblank09" rel="noreferrer" target="_blank">github.com/bblank09</a>
