@@ -22,7 +22,11 @@ app = FastAPI(title="Monte Carlo Simulation API", version="0.1.0")
 app.state.limiter = limiter
 
 
-async def rate_limit_exception_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+async def rate_limit_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    # FastAPI's add_exception_handler requires handlers typed to accept the
+    # base Exception (it's contravariant in the handler's parameter type);
+    # RateLimitExceeded is the only exception ever routed here.
+    assert isinstance(exc, RateLimitExceeded)
     return JSONResponse(
         status_code=429,
         content={"detail": "Too many simulation requests. Try again later.", "code": ErrorCode.RATE_LIMIT_EXCEEDED.value},
