@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import DarkVeil from "./components/DarkVeil";
 import { Stepper } from "./components/Stepper";
 import { RunOverlay } from "./components/RunOverlay";
 import { PortfolioStep } from "./components/PortfolioStep";
@@ -12,9 +13,10 @@ const DEFAULT_REQUEST: SimulateRequest = {
   initial_amount: 1_000_000,
   simulation_period_years: 30,
   tax_treatment: "pre_tax",
+  tax_rate: 0.2,
   simulation_model: "historical",
   n_paths: 10000,
-  rebalancing: "annual",
+  rebalancing: "none",
   bootstrap_model: "single_year",
   use_full_history: true,
   sequence_of_returns_risk: 0,
@@ -42,20 +44,15 @@ const STEPS = ["portfolio", "parameters", "results"] as const;
 type Step = (typeof STEPS)[number];
 
 const SESSION_KEY = "mc-session";
-const LEGACY_MULTIPLE_GOAL_KEYS = new Set([
-  "multi_goal_enabled",
-  "goals",
-  "years_to_retirement",
-  "glide_path_years",
-  "retirement_holdings",
-]);
-
 type StoredSession = {
   holdings: Holding[];
   params: SimulateRequest;
   stepIndex: number;
   unlockedStep: number;
 };
+
+type AppErrorKind = "funds" | "shared_run" | "simulation";
+type AppError = { kind: AppErrorKind; message: string; detail: string };
 
 function loadStoredSession(): StoredSession | null {
   try {
@@ -71,22 +68,34 @@ function loadStoredSession(): StoredSession | null {
 
 function initialParameters(session: StoredSession | null): SimulateRequest {
   const stored = (session?.params ?? {}) as unknown as Record<string, unknown>;
-  const cleanStored = Object.fromEntries(
-    Object.entries(stored).filter(([key]) => !LEGACY_MULTIPLE_GOAL_KEYS.has(key)),
-  ) as Partial<SimulateRequest>;
-  return { ...DEFAULT_REQUEST, ...cleanStored };
+  const merged = { ...DEFAULT_REQUEST, ...stored } as SimulateRequest;
+  const supportedCashflowModes = new Set(["none", "contribute", "withdraw_fixed", "withdraw_percent"]);
+  if (!supportedCashflowModes.has(merged.cashflow_mode ?? "none")) merged.cashflow_mode = "none";
+  if (merged.simulation_model !== "statistical") merged.rebalancing = "none";
+  if (merged.simulation_model === "statistical" && merged.time_series_model !== "normal") merged.rebalancing = "none";
+  if (merged.simulation_model !== "historical") merged.use_full_history = undefined;
+  return merged;
 }
 
 export function App() {
   const initialSession = loadStoredSession();
-  const [stepIndex, setStepIndex] = useState(initialSession?.stepIndex ?? 0);
-  const [unlockedStep, setUnlockedStep] = useState(initialSession?.unlockedStep ?? 0);
+  // Keep the user's draft inputs across a refresh, but always start a fresh
+  // browser visit at Portfolio. Persisting the last navigation state here
+  // made an old completed run unlock Assumptions and Results immediately on
+  // the next visit, so the top-bar stepper appeared clickable before the
+  // current workflow had passed those steps. A shared `?run=` link still
+  // unlocks the full flow below after its saved result is loaded.
+  const [stepIndex, setStepIndex] = useState(0);
+  const [unlockedStep, setUnlockedStep] = useState(0);
   const [funds, setFunds] = useState<FundSummary[]>([]);
   const [holdings, setHoldings] = useState<Holding[]>(initialSession?.holdings ?? []);
-  const [params, setParams] = useState<SimulateRequest>(() => initialParameters(initialSession));
+  const [params, setParams] = useState<SimulateRequest>(() => ({
+    ...initialParameters(initialSession),
+    holdings: initialSession?.holdings ?? [],
+  }));
   const [result, setResult] = useState<SimulateResponse | null>(null);
   const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<AppError | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">(() => (localStorage.getItem("mc-theme") === "dark" ? "dark" : "light"));
 
@@ -96,35 +105,13 @@ export function App() {
   }, [theme]);
 
   useEffect(() => {
-    getFunds()
-      .then(setFunds)
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load funds"));
+    void loadFunds();
   }, []);
 
   useEffect(() => {
     const runId = new URLSearchParams(window.location.search).get("run");
     if (!runId) return;
-    let ignore = false;
-    setRunning(true);
-    fetchSimulationByRunId(runId)
-      .then((response) => {
-        if (ignore) return;
-        const savedRequest = response.run_config as unknown as SimulateRequest;
-        setResult(response);
-        setParams({ ...DEFAULT_REQUEST, ...savedRequest });
-        setHoldings(savedRequest.holdings ?? []);
-        setUnlockedStep(2);
-        setStepIndex(2);
-      })
-      .catch((e) => {
-        if (!ignore) setError(`Could not load shared run "${runId}": ${e instanceof Error ? e.message : "Unknown error"}`);
-      })
-      .finally(() => {
-        if (!ignore) setRunning(false);
-      });
-    return () => {
-      ignore = true;
-    };
+    void loadSharedRun(runId);
   }, []);
 
   useEffect(() => {
@@ -142,6 +129,43 @@ export function App() {
     if (index <= unlockedStep) setStepIndex(index);
   }
 
+  function errorDetail(errorValue: unknown): string {
+    return errorValue instanceof Error ? errorValue.message : "Unknown error";
+  }
+
+  async function loadFunds() {
+    try {
+      const loadedFunds = await getFunds();
+      setFunds(loadedFunds);
+      setError((current) => (current?.kind === "funds" ? null : current));
+    } catch (e) {
+      setError({ kind: "funds", message: "We couldn’t load fund data.", detail: errorDetail(e) });
+    }
+  }
+
+  async function loadSharedRun(runId: string) {
+    setRunning(true);
+    setError(null);
+    try {
+      const response = await fetchSimulationByRunId(runId);
+      const savedRequest = initialParameters({
+        holdings: [],
+        params: response.run_config as unknown as SimulateRequest,
+        stepIndex: 2,
+        unlockedStep: 2,
+      });
+      setResult(response);
+      setParams({ ...DEFAULT_REQUEST, ...savedRequest });
+      setHoldings(savedRequest.holdings ?? []);
+      setUnlockedStep(2);
+      setStepIndex(2);
+    } catch (e) {
+      setError({ kind: "shared_run", message: `We couldn’t load shared run "${runId}".`, detail: errorDetail(e) });
+    } finally {
+      setRunning(false);
+    }
+  }
+
   async function runSimulation() {
     const request: SimulateRequest = { ...params, holdings };
     setRunning(true);
@@ -155,14 +179,21 @@ export function App() {
       setUnlockedStep(2);
       setStepIndex(2);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Simulation failed");
+      setError({ kind: "simulation", message: "We couldn’t run the simulation.", detail: errorDetail(e) });
     } finally {
       setRunning(false);
     }
   }
 
   function retrySimulation() {
-    void runSimulation();
+    if (error?.kind === "funds") {
+      void loadFunds();
+    } else if (error?.kind === "shared_run") {
+      const runId = new URLSearchParams(window.location.search).get("run");
+      if (runId) void loadSharedRun(runId);
+    } else {
+      void runSimulation();
+    }
   }
 
   function startOver() {
@@ -192,6 +223,9 @@ export function App() {
 
   return (
     <div className="shell">
+      <div className="app-veil" aria-hidden="true">
+        <DarkVeil hueShift={342} speed={1.5} scanlineFrequency={0.5} />
+      </div>
       <header className="topbar">
         <div className="brand">
           <img alt="Monte Carlo Simulation" className="mark" src="/brand/topbar-mark.png" />
@@ -207,16 +241,16 @@ export function App() {
 
       <div className="main">
         {error && (
-          <div className="errorBanner">
+          <div className="errorBanner" role="alert">
             <span className="ic">&#9888;</span>
             <div className="banner-body">
-              <p className="banner-message">We couldn&rsquo;t run the simulation. Please try again.</p>
+              <p className="banner-message">{error.message}</p>
               <details className="banner-detail">
                 <summary>Technical details</summary>
-                <span>{error}</span>
+                <span>{error.detail}</span>
               </details>
               <button className="btn btn-ghost btn-sm" onClick={retrySimulation} type="button">
-                Try again
+                {error.kind === "funds" ? "Retry fund loading" : error.kind === "shared_run" ? "Retry shared run loading" : "Try simulation again"}
               </button>
             </div>
           </div>
@@ -225,7 +259,10 @@ export function App() {
           <PortfolioStep
             funds={funds}
             active
-            onHoldingsChange={setHoldings}
+            onHoldingsChange={(nextHoldings) => {
+              setHoldings(nextHoldings);
+              setParams((current) => ({ ...current, holdings: nextHoldings }));
+            }}
             onContinue={() => {
               setUnlockedStep((current) => Math.max(current, 1));
               setStepIndex(1);

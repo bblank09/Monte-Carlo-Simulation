@@ -159,7 +159,29 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 *::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: var(--r-pill); border: 2px solid transparent; background-clip: padding-box; }
 
 /* ---------- Shell / top bar ---------- */
-.shell { display: grid; grid-template-rows: auto 1fr; min-height: 100vh; }
+.shell { display: grid; grid-template-rows: auto 1fr; min-height: 100vh; position: relative; z-index: 0; }
+
+/* Animated DarkVeil background: fixed behind the whole app, opaque surfaces
+   (topbar/cards/footer) sit above it undisturbed. Dark theme lets it read at
+   near-full strength; light theme dims it and washes it toward white so it
+   frames the page instead of fighting the bright UI. */
+.app-veil {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+  opacity: 0.55;
+  transition: opacity .3s ease;
+}
+:root[data-theme="dark"] .app-veil { opacity: 0.65; }
+:root[data-theme="light"] .app-veil {
+  opacity: 0.16;
+  mix-blend-mode: multiply;
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-veil { display: none; }
+}
 
 .topbar {
   display: flex;
@@ -186,7 +208,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .stepper { display: flex; align-items: center; gap: 4px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-pill); padding: 4px; }
 .step {
   display: flex; align-items: center; gap: 6px; padding: 6px 14px 6px 10px;
-  border-radius: var(--r-pill); color: var(--text-tertiary); font-size: 12.5px; font-weight: 500;
+  border: 0; background: transparent; border-radius: var(--r-pill); color: var(--text-tertiary); font-size: 12.5px; font-weight: 500;
   cursor: pointer; user-select: none; transition: background .15s, color .15s; white-space: nowrap;
 }
 .step .dot {
@@ -197,6 +219,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .step.active { background: var(--surface); box-shadow: var(--shadow-sm); color: var(--text-primary); }
 .step.active .dot { background: var(--accent); color: white; }
 .step.locked { cursor: not-allowed; opacity: .55; }
+.step:disabled { cursor: not-allowed; }
 .step-sep { width: 14px; height: 1px; background: var(--border-strong); }
 
 .stepper-compact {
@@ -237,6 +260,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 /* ---------- Holdings / portfolio builder ---------- */
 .holdings-table { display: flex; flex-direction: column; gap: 10px; }
 .holdings-head, .holdings-row { display: grid; grid-template-columns: 1fr 110px 34px; gap: 10px; align-items: center; }
+.holdings-row { align-items: start; }
 .holdings-head { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); padding: 0 2px; }
 @media (max-width: 520px) {
   .holdings-head { display: none; }
@@ -361,7 +385,8 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .advanced-toggle {
   display: flex; align-items: center; gap: 8px; cursor: pointer;
   font-size: 13px; font-weight: 600; color: var(--text-primary);
-  padding: 10px 0; border-top: 1px solid var(--border); margin-top: 18px;
+  width: 100%; padding: 10px 0; border: 0; border-top: 1px solid var(--border); margin-top: 18px;
+  background: transparent; text-align: left;
 }
 .advanced-toggle .chev { transition: transform .15s; color: var(--text-tertiary); display: inline-block; }
 .advanced-toggle.open .chev { transform: rotate(90deg); }
@@ -381,6 +406,10 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .field-error { margin-top: 6px; font-size: 11.5px; font-weight: 650; color: var(--danger); }
 .form-validation-summary { grid-column: 1 / -1; margin-top: 0; }
 .field-static { margin: 0; padding: 0 2px; font-size: 13px; color: var(--text-secondary); height: 38px; display: flex; align-items: center; }
+.check-row { display: inline-flex; align-items: center; gap: 8px; color: var(--text-primary); font-size: 13px; cursor: pointer; }
+.check-row input { accent-color: var(--accent); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.goals-editor { margin-top: 12px; padding: 14px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); }
 
 .goals-table { display: grid; gap: 10px; margin-top: 2px; }
 .goals-head, .goal-row { display: grid; grid-template-columns: minmax(150px, 1.35fr) 112px minmax(104px, .9fr) 112px 92px 92px 112px 34px; gap: 10px; align-items: start; }
