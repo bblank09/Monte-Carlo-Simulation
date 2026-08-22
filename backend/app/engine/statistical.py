@@ -1,6 +1,7 @@
 import numpy as np
-from backend.app.engine.gbm import simulate_gbm_paths
+
 from backend.app.engine.forecasted import _garch_annual_returns
+from backend.app.engine.gbm import simulate_gbm_paths
 
 _REBALANCE_STEPS_PER_YEAR = {"none": None, "annual": 1, "semiannual": 2, "quarterly": 4, "monthly": 12}
 
@@ -36,7 +37,7 @@ def _rebalanced_portfolio_values(asset_paths: np.ndarray, weights: np.ndarray, r
     """Rebuild portfolio value year-by-year, resetting each asset's weight to its target at
     every rebalance date. Each asset's within-period return between rebalance dates is applied
     to its target-weighted share of the portfolio value at the start of that period."""
-    n_paths, n_steps_plus_one, n_assets = asset_paths.shape
+    n_paths, n_steps_plus_one, _n_assets = asset_paths.shape
     steps_per_year = (n_steps_plus_one - 1) // n_years
     total_rebalances = rebalances_per_year * n_years
     steps_per_rebalance = steps_per_year // rebalances_per_year

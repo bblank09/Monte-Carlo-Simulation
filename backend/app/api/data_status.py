@@ -1,14 +1,15 @@
 import json
-from pathlib import Path
 
 import pandas as pd
 from fastapi import APIRouter
 
+from backend.app.core.config import resolve_project_path, settings
 from backend.app.core.errors import AppHTTPException
+from backend.app.data.sec_client import MIN_USABLE_NAV_OBSERVATIONS
 from backend.app.domain.enums import ErrorCode
 
 router = APIRouter(prefix="/data-status", tags=["data-status"])
-PROCESSED_DIR = Path("data/processed")
+PROCESSED_DIR = resolve_project_path(settings.processed_dir)
 FUND_UNIVERSE_PATH = PROCESSED_DIR / "fund_universe.csv"
 NAV_PANEL_PATH = PROCESSED_DIR / "nav_panel.parquet"
 MANIFEST_PATH = PROCESSED_DIR / "sec_data_manifest.json"
@@ -45,6 +46,7 @@ def get_data_status() -> dict:
             "nav_as_of": nav_end,
             "nav_start": nav_start,
             "fund_count": int(universe["proj_id"].nunique()),
+            "min_usable_nav_observations": MIN_USABLE_NAV_OBSERVATIONS,
         }
     except AppHTTPException:
         raise

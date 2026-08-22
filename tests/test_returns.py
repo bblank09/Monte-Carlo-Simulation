@@ -1,9 +1,10 @@
 import numpy as np
 import pandas as pd
 
+from backend.app.data.returns import estimate_mu_sigma, log_returns
+
 
 def test_log_returns_and_moments():
-    from returns_lib import log_returns, estimate_mu_sigma
     dates = pd.date_range("2024-01-01", periods=252, freq="B")
     rng = np.random.default_rng(42)
     prices = pd.DataFrame({

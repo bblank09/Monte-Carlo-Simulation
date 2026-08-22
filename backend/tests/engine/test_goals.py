@@ -176,8 +176,9 @@ def test_build_cashflow_series_nominal_only_without_inflation():
          "frequency": "annually", "starts_year": 0, "ends_year": 3},
     ]
     series = build_cashflow_series(paths, initial_amount=1000.0, goals=goals)
-    assert len(series["cashflows_nominal"]) == 3
-    assert series["cashflows_nominal"][0] == -100.0
+    assert series["years"] == [0, 1, 2, 3]
+    assert len(series["cashflows_nominal"]) == 4
+    assert series["cashflows_nominal"] == [0.0, -100.0, -100.0, -100.0]
     assert series["cashflows_present_dollar"] == series["cashflows_nominal"]
 
 
@@ -192,7 +193,7 @@ def test_build_cashflow_series_present_dollar_discounts_with_inflation():
     # Year 2 (index 1) present-dollar value is discounted by (1.10)^2 vs. nominal --
     # for a negative (withdrawal) cashflow, "discounted" means smaller magnitude
     # (closer to zero), not a smaller signed value.
-    assert abs(series["cashflows_present_dollar"][1]) < abs(series["cashflows_nominal"][1])
+    assert abs(series["cashflows_present_dollar"][2]) < abs(series["cashflows_nominal"][2])
 
 
 def test_build_cashflow_series_inflation_adjusted_goal_keeps_real_amount_constant():
@@ -203,5 +204,5 @@ def test_build_cashflow_series_inflation_adjusted_goal_keeps_real_amount_constan
     ]
     inflation_draws = np.full((5, 3), 0.10)
     series = build_cashflow_series(paths, initial_amount=1000.0, goals=goals, inflation_draws=inflation_draws)
-    assert np.allclose(series["cashflows_nominal"], [-110.0, -121.0, -133.1])
-    assert np.allclose(series["cashflows_present_dollar"], [-100.0, -100.0, -100.0])
+    assert np.allclose(series["cashflows_nominal"], [0.0, -110.0, -121.0, -133.1])
+    assert np.allclose(series["cashflows_present_dollar"], [0.0, -100.0, -100.0, -100.0])

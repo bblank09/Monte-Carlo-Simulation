@@ -19,7 +19,7 @@ def test_historical_request_produces_all_response_sections():
     req = SimulateRequest(
         holdings=[Holding(proj_id="M0027_2535", weight=60.0), Holding(proj_id="M0209_2548", weight=40.0)],
         initial_amount=1_000_000, simulation_period_years=10, tax_treatment="pre_tax",
-        simulation_model="historical", n_paths=2000, seed=1, rebalancing="annual",
+        simulation_model="historical", n_paths=2000, seed=1, rebalancing="none",
         bootstrap_model="single_year", use_full_history=True, sequence_of_returns_risk=0,
         inflation_model="parameterized", inflation_mean=0.03, inflation_volatility=0.01,
     )
@@ -36,7 +36,7 @@ def test_parameterized_request_skips_data_estimation():
     req = SimulateRequest(
         holdings=[Holding(proj_id="M0027_2535", weight=100.0)],
         initial_amount=500_000, simulation_period_years=15, tax_treatment="pre_tax",
-        simulation_model="parameterized", n_paths=2000, seed=2, rebalancing="annual",
+        simulation_model="parameterized", n_paths=2000, seed=2, rebalancing="none",
         distribution="normal", expected_return=0.07, expected_volatility=0.14,
         inflation_model="parameterized", inflation_mean=0.03, inflation_volatility=0.01,
     )
@@ -48,7 +48,7 @@ def test_percentile_table_has_all_eight_metrics_end_to_end():
     req = SimulateRequest(
         holdings=[Holding(proj_id="M0027_2535", weight=60.0), Holding(proj_id="M0209_2548", weight=40.0)],
         initial_amount=1_000_000, simulation_period_years=10, tax_treatment="pre_tax",
-        simulation_model="historical", n_paths=1000, seed=1, rebalancing="annual",
+        simulation_model="historical", n_paths=1000, seed=1, rebalancing="none",
         bootstrap_model="single_year", use_full_history=True, sequence_of_returns_risk=0,
         inflation_model="historical",
     )
@@ -67,7 +67,7 @@ def test_multistage_glide_path_request_produces_goals_section_with_glide_path():
     req = SimulateRequest(
         holdings=[Holding(proj_id="M0027_2535", weight=60.0), Holding(proj_id="M0209_2548", weight=40.0)],
         initial_amount=1_000_000, simulation_period_years=10, tax_treatment="pre_tax",
-        simulation_model="historical", n_paths=1000, seed=1, rebalancing="annual",
+        simulation_model="historical", n_paths=1000, seed=1, rebalancing="none",
         bootstrap_model="single_year", use_full_history=True, sequence_of_returns_risk=0,
         inflation_model="parameterized", inflation_mean=0.03, inflation_volatility=0.01,
         multi_goal_enabled=True,

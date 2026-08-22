@@ -165,44 +165,40 @@ def glide_path_weights(
 
 
 def build_cashflow_series(paths: np.ndarray, initial_amount: float, goals: list[dict], inflation_draws: np.ndarray | None = None) -> dict:
-    """Per-year median net cashflow across all simulated paths, for the Goals &
-    Cashflows tab's chart. `inflation_draws` (shape (n_paths, n_years), from
-    engine/inflation.py) discounts nominal cashflows to present-dollar terms via the
-    per-path cumulative inflation factor; without it, present-dollar == nominal."""
+    """Build cashflow values with an explicit Year 0..N axis.
+
+    Year 0 is the initial balance before the first growth transition. Cashflows are
+    therefore written to the balance year in which they occur, keeping the API, chart,
+    and mock convention identical.
+    """
     n_years = paths.shape[1] - 1
-    nominal = np.zeros(n_years)
+    years = list(range(n_years + 1))
+    nominal = np.zeros(n_years + 1)
     inflation_factors = _inflation_factors(inflation_draws, paths.shape[0], n_years)
     median_inflation_factors = np.median(inflation_factors, axis=0)
-    for year in range(n_years):
+    for transition_year in range(n_years):
+        calendar_year = transition_year + 1
         net = 0.0
         for goal in goals:
-            # `year` indexes the transition that LANDS at balance year (year + 1), so a
-            # goal active for calendar years [starts_year, ends_year] inclusive fires on
-            # every transition whose landing year falls in that inclusive range --
-            # equivalently `starts_year - 1 <= year < ends_year`. Comparing `year` itself
-            # against `starts_year` (i.e. `starts_year <= year < ends_year`) silently
-            # drops the very first withdrawal/contribution year whenever starts_year >= 1
-            # (starts_year == 0 is unaffected since year is never negative -- note
-            # this means starts_year=0 and starts_year=1 both resolve to the same
-            # `-1 <= year` / `0 <= year` lower bound and therefore collide on the
-            # same first transition (year=0, landing at balance-year 1). This is
-            # accepted as intentional: year 0 is the initial balance before any
-            # growth has occurred, so a goal cannot meaningfully start "in" year 0
-            # vs. year 1 -- both mean "active from the very first transition".)
-            if goal["starts_year"] - 1 <= year < goal["ends_year"]:
+            # A goal starting at Year 0 is active from the first simulated transition;
+            # there is no pre-growth cashflow at the initial balance point.
+            start_year = max(1, goal["starts_year"])
+            if start_year <= calendar_year <= goal["ends_year"]:
                 sign = -1.0 if goal["is_withdrawal"] else 1.0
                 amount = _annualized_goal_amount(goal)
                 if goal.get("inflation_adjusted", False):
-                    amount *= median_inflation_factors[year]
+                    amount *= median_inflation_factors[transition_year]
                 net += sign * amount
-        nominal[year] = net
+        nominal[calendar_year] = net
 
     if inflation_draws is None:
         present_dollar = nominal.copy()
     else:
-        present_dollar = nominal / median_inflation_factors
+        present_dollar = np.zeros_like(nominal)
+        present_dollar[1:] = nominal[1:] / median_inflation_factors
 
     return {
+        "years": years,
         "cashflows_nominal": nominal.tolist(),
         "cashflows_present_dollar": present_dollar.tolist(),
     }

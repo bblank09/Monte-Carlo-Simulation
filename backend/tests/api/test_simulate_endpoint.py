@@ -1,7 +1,9 @@
 from unittest.mock import patch
+
 from fastapi.testclient import TestClient
-from backend.app.main import app
+
 from backend.app.domain.schemas import SimulateResponse
+from backend.app.main import app
 
 client = TestClient(app)
 
@@ -29,7 +31,7 @@ def test_simulate_endpoint_returns_200(mock_persist, mock_run, mock_load):
     payload = {
         "holdings": [{"proj_id": "M0027_2535", "weight": 100.0}],
         "initial_amount": 1000000, "simulation_period_years": 10, "tax_treatment": "pre_tax",
-        "simulation_model": "parameterized", "n_paths": 1000, "seed": 1, "rebalancing": "annual",
+        "simulation_model": "parameterized", "n_paths": 1000, "seed": 1, "rebalancing": "none",
         "distribution": "normal", "expected_return": 0.07, "expected_volatility": 0.14,
         "inflation_model": "parameterized", "inflation_mean": 0.03, "inflation_volatility": 0.01,
     }
@@ -38,6 +40,7 @@ def test_simulate_endpoint_returns_200(mock_persist, mock_run, mock_load):
     assert resp.json()["overview"]["survival_rate"] == 0.95
     assert resp.json()["run_id"].startswith("run_")
     assert resp.json()["data_source"] == "sec_open_data"
+    mock_load.assert_not_called()
     mock_persist.assert_called_once()
 
 
@@ -49,7 +52,7 @@ def test_get_simulation_returns_persisted_run(tmp_path, monkeypatch):
     request = SimulateRequest.model_validate({
         "holdings": [{"proj_id": "M0027_2535", "weight": 100.0}],
         "initial_amount": 1000000, "simulation_period_years": 10, "tax_treatment": "pre_tax",
-        "simulation_model": "parameterized", "n_paths": 1000, "seed": 1, "rebalancing": "annual",
+        "simulation_model": "parameterized", "n_paths": 1000, "seed": 1, "rebalancing": "none",
         "distribution": "normal", "expected_return": 0.07, "expected_volatility": 0.14,
         "inflation_model": "parameterized", "inflation_mean": 0.03, "inflation_volatility": 0.01,
     })

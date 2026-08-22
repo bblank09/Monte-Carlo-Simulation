@@ -1,9 +1,10 @@
 import numpy as np
 import pandas as pd
 
+from backend.app.engine.historical import simulate_historical
+
 
 def test_historical_bootstrap_shape():
-    from historical_sim import simulate_historical
     rng = np.random.default_rng(1)
     dates = pd.date_range("2015-01-01", periods=1500, freq="B")
     rets = pd.DataFrame(rng.normal(0.0003, 0.01, (1500, 2)), index=dates, columns=["A", "B"])

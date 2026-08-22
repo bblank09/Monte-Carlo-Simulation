@@ -77,6 +77,7 @@ def test_find_equity_funds_filters_policy_and_main_class(fake_fund_universe):
     assert funds[0]["policy_desc"] == "ตราสารทุน"
     assert funds[0]["nav_gap_count"] == 0
     assert funds[0]["nav_start"] is None
+    assert funds[0]["nav_months"] is None
     json.dumps(funds, allow_nan=False)
 
 
@@ -90,3 +91,18 @@ def test_find_funds_keeps_the_full_backtest_universe(fake_fund_universe):
         "amc_name_en", "policy_desc", "nav_start", "nav_end", "nav_gap_count",
     }
     json.dumps(funds, allow_nan=False)
+
+
+def test_fund_universe_marks_whether_nav_is_available(tmp_path, monkeypatch, fake_fund_universe):
+    nav_panel = tmp_path / "nav_panel.parquet"
+    pd.DataFrame({"proj_id": ["A", "A"], "nav_date": ["2024-01-01", "2024-01-02"]}).to_parquet(nav_panel, index=False)
+    monkeypatch.setattr(sec_client, "NAV_PANEL_PATH", nav_panel)
+
+    funds = sec_client.find_funds()
+
+    assert {fund["proj_id"]: fund["nav_available"] for fund in funds} == {
+        "A": False,
+        "B": False,
+        "C": False,
+    }
+    assert next(fund for fund in funds if fund["proj_id"] == "A")["nav_observations"] == 2

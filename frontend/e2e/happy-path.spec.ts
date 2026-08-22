@@ -39,7 +39,7 @@ test("build a portfolio, run a historical simulation, and see results", async ({
 
   // Results step
   await expect(page.getByText(/ended with a positive balance|funded the configured cashflows/i)).toBeVisible({ timeout: 120_000 });
-  await expect(page.getByRole("button", { name: "Growth" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Growth" })).toBeVisible();
   await expect(page).toHaveURL(/[?&]run=run_\d{8}_\d{6}_[0-9a-f]{8}/);
   await expect(page.getByRole("button", { name: "Result JSON" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Copy shareable link" })).toBeVisible();
@@ -55,7 +55,9 @@ test("build a portfolio, run a historical simulation, and see results", async ({
     ["Report", /Simulation diagnostics/],
   ] as const;
   for (const [tab, heading] of tabChecks) {
-    await page.getByRole("button", { name: tab, exact: true }).click();
+    const tabButton = page.getByRole("tab", { name: tab, exact: true });
+    await tabButton.click();
+    await expect(tabButton).toHaveAttribute("aria-selected", "true");
     await expect(page.getByRole("heading", { name: heading })).toBeVisible();
     if (tab === "Distribution") {
       await expect(page.getByLabel("Target ending balance")).toBeVisible();

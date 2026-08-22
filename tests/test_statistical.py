@@ -1,8 +1,9 @@
 import numpy as np
 
+from backend.app.engine.statistical import simulate_statistical
+
 
 def test_statistical_uses_gbm_engine_and_matches_moments():
-    from statistical_sim import simulate_statistical
     mu = np.array([0.08, 0.05])
     sigma = np.array([[0.04, 0.006], [0.006, 0.0225]])
     weights = np.array([0.5, 0.5])

@@ -46,4 +46,5 @@ def test_data_status_is_available_under_both_api_prefixes(tmp_path, monkeypatch)
             "nav_as_of": "2024-01-02",
             "nav_start": "2020-01-01",
             "fund_count": 1,
+            "min_usable_nav_observations": 252,
         }

@@ -14,7 +14,9 @@ application estimates “what could happen?” across many simulated paths.
 - Persists each completed result as `data/runs/<run_id>/request.json` and
   `result.json`.
 - Adds the run id to the URL so a result can be reopened and shared; the
-  Results view also provides a `Result JSON` download.
+  Results view also provides a `Result JSON` download. Shared run URLs are
+  public-by-link artifacts: anyone who has the run ID can read that saved
+  portfolio configuration and result.
 
 The simulation is not investment advice and does not guarantee future results.
 
@@ -63,7 +65,7 @@ application can run against the committed cache without an API key.
 Supported SEC key names are `SEC_API_KEY` and the original MC name
 `SEC_OPENDATA_API_KEY`. `SEC_API_BASE_URL` is optional and defaults to
 `https://api.sec.or.th`. `ALLOWED_ORIGINS` accepts a comma-separated list and
-defaults to `*`.
+defaults to the local frontend/backend origins listed in `.env.example`.
 
 ## Run locally
 
@@ -126,6 +128,7 @@ used because the project directory name contains `:`.
 
 ```bash
 pytest -q
+pytest tests -q
 ruff check .
 mypy backend
 npm --prefix frontend ci
@@ -140,9 +143,10 @@ npx playwright install chromium   # first run only
 npm run test:e2e
 ```
 
-GitHub Actions runs the backend test suite and frontend build on pushes and
-pull requests to `main`. The scheduled refresh workflow is separate because it
-is the only job allowed to call the SEC API and commit cache changes.
+GitHub Actions runs backend tests, Ruff, mypy, the frontend build, and the
+Playwright smoke suite on pushes and pull requests to `main`. The scheduled
+refresh workflow is separate because it is the only job allowed to call the
+SEC API and commit cache changes.
 
 ## Repository structure
 
@@ -162,8 +166,16 @@ data/runs/             Ignored persisted run artifacts
 ## Known limitations
 
 - Simulated paths are model-dependent estimates, not forecasts or guarantees.
-- SEC NAV history can contain gaps; the application rejects unusable histories
-  rather than fabricating returns through interpolation.
+- SEC NAV history can contain gaps; the application rejects extended interior
+  reporting outages rather than fabricating returns through interpolation. It
+  only forward-fills short isolated cross-fund calendar mismatches, using the
+  explicit threshold in `backend/app/data/returns.py`.
+- A fund is selectable only when its cached NAV has at least 252 distinct
+  observations. The Parameterized model is assumption-only and does not
+  require NAV history; historical holding diagnostics are marked unavailable
+  for that model.
+- Rebalancing is currently supported only for Statistical Normal returns. Other
+  models must use `none` until their portfolio-level semantics are implemented.
 - Historical and statistical model assumptions are documented in the code and
   the in-app Report tab; changing assumptions changes the distribution.
 - No account system, broker execution, portfolio optimization, or live market

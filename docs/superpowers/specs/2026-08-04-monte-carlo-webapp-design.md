@@ -1,8 +1,15 @@
 # Monte Carlo Simulation Webapp — Design Spec
 
 Date: 2026-08-04
-Status: draft, pending user review
+Status: draft implementation reference; release contract is the shipped
+schema/API/UI documented in `README.md` and `CLAUDE.md`
 Supersedes: `docs/superpowers/specs/2026-07-29-monte-carlo-webapp-design.md` (deleted — its yfinance/US-ticker scope is obsolete)
+
+Implementation boundary (2026-08-14): this document records the original full-parity
+aspiration, not an acceptance claim that every Portfolio Visualizer control is shipped.
+The current release supports the fields present in `backend/app/domain/schemas.py`.
+Unsupported PV-only controls must not be added to the UI until their API and engine
+semantics are specified and tested.
 
 ## 1. Goal
 
@@ -78,8 +85,9 @@ matching how portfoliovisualizer.com itself conditionally shows fields:
 
 **Inflation & Rebalancing**
 - Inflation Model: Historical / Parameterized (mean + volatility)
-- Rebalancing: No rebalancing / Annual / Semi-annual / Quarterly / Monthly — confirmed
-  present in PV's own form (not an invented field)
+- Rebalancing: No rebalancing / Annual / Semi-annual / Quarterly / Monthly — the
+  shipped implementation exposes these frequencies only for Statistical Normal;
+  the broader all-model parity requirement remains future work.
 
 ## 5. Results tab (step 3) — 7 sub-tabs
 

@@ -10,12 +10,12 @@ verification (docs/manual-verification-formula-audit.md, Task 2/4/5):
 import numpy as np
 import pytest
 
+from backend.app.engine.goals import apply_named_goals, build_cashflow_series
 from backend.app.engine.results import (
     percentile_table,
     sharpe_sortino_by_percentile,
     withdrawal_rates_by_percentile,
 )
-from backend.app.engine.goals import apply_named_goals, build_cashflow_series
 
 
 def test_twrr_nominal_strips_cashflow_effect_instead_of_matching_cagr():

@@ -3,10 +3,9 @@ import { mockFunds, mockSimulateResponse } from "./mockData";
 
 const API_BASE = "/api";
 
-// USE_MOCK is the single switch between Phase 1 (UX/UI on mock data) and Phase 3
-// (real backend wired in). Flip via VITE_USE_MOCK=false in .env.local, or the Task 19b
-// wiring step removes the mock branch entirely once the backend is ready. No component
-// that imports postSimulate/getFunds needs to change either way.
+// USE_MOCK is an optional deterministic fixture switch for local UI development.
+// Production keeps it false so the SEC-backed API remains the source of truth; no
+// component that imports postSimulate/getFunds needs to change when the switch changes.
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === "true";
 
 export async function postSimulate(request: SimulateRequest): Promise<SimulateResponse> {

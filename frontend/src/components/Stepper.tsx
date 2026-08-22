@@ -46,9 +46,15 @@ function StepItem({
   return (
     <>
       {index > 0 ? <div className="step-sep" /> : null}
-      <div className={classNames} onClick={() => { if (!locked) onStepClick(index); }}>
-        <span className="dot">{index + 1}</span>{label}
-      </div>
+      <button
+        aria-current={index === currentStep ? "step" : undefined}
+        className={classNames}
+        disabled={locked}
+        onClick={() => onStepClick(index)}
+        type="button"
+      >
+        <span aria-hidden="true" className="dot">{index + 1}</span>{label}
+      </button>
     </>
   );
 }

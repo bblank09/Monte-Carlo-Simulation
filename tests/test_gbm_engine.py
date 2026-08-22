@@ -1,8 +1,9 @@
 import numpy as np
 
+from backend.app.engine.gbm import simulate_gbm_paths
+
 
 def test_gbm_paths_shape_and_moments():
-    from gbm_engine import simulate_gbm_paths
     mu = np.array([0.08, 0.05])
     sigma = np.array([[0.04, 0.01], [0.01, 0.0225]])  # vol 20% and 15%, corr 0.333
     S0 = np.array([100.0, 100.0])

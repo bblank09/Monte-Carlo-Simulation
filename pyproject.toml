@@ -25,9 +25,12 @@ dev = ["pytest>=8.2", "pytest-cov>=5.0", "ruff>=0.5", "mypy>=1.10", "pandas-stub
 [tool.setuptools.packages.find]
 include = ["backend*"]
 
+[tool.ruff]
+exclude = ["notebooks", "tests"]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
-testpaths = ["backend/tests"]
+testpaths = ["backend/tests", "tests"]
 
 [tool.mypy]
 explicit_package_bases = true

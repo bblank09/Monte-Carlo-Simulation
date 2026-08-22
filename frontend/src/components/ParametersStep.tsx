@@ -1,11 +1,23 @@
 import { useState } from "react";
 import { Info } from "lucide-react";
-import type { SimulateRequest } from "../types/simulate";
+import type { Holding, NamedGoal, SimulateRequest } from "../types/simulate";
 
 const SIMULATION_MODEL_HELP = "Controls how randomness is generated: Historical replays real past returns, Forecasted and Statistical simulate returns from a time-series model, and Parameterized draws from a distribution you define directly.";
 const BOOTSTRAP_MODEL_HELP = "Determines how chunks of historical returns are resampled to build each simulated path (by single month, single year, or multi-year block).";
 const SEQUENCE_OF_RETURNS_RISK_HELP = "Front-loads the worst historical years so you can see how a bad early sequence of returns affects the outcome.";
 const TIME_SERIES_MODEL_HELP = "Normal assumes constant volatility over time; GARCH lets volatility cluster and change, closer to real market behavior.";
+
+function defaultGoal(horizon: number): NamedGoal {
+  return {
+    purpose: "Retirement spending",
+    is_withdrawal: true,
+    amount: 5_000,
+    inflation_adjusted: true,
+    frequency: "monthly",
+    starts_year: 1,
+    ends_year: horizon,
+  };
+}
 
 function InfoTip({ text }: { text: string }) {
   return (
@@ -47,6 +59,9 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, ru
   } else if (value.n_paths < 1000) {
     fieldErrors.n_paths = "Fewer than 1,000 paths gives statistically unreliable percentile estimates.";
   }
+  if (value.tax_treatment === "after_tax" && (!Number.isFinite(value.tax_rate) || (value.tax_rate ?? -1) < 0 || (value.tax_rate ?? 2) > 1)) {
+    fieldErrors.tax_rate = "After-tax simulations require a tax rate between 0% and 100%.";
+  }
   if ((value.simulation_model === "forecasted" || value.simulation_model === "statistical") && !value.time_series_model) {
     fieldErrors.time_series_model = "Choose a time-series model.";
   }
@@ -80,10 +95,86 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, ru
   if (value.simulation_model === "historical" && value.bootstrap_model === "block_of_years" && (!Number.isInteger(value.block_years) || (value.block_years ?? 0) < 1)) {
     fieldErrors.block_years = "Block size must be at least 1 year.";
   }
+  const supportsRebalancing = value.simulation_model === "statistical" && (value.time_series_model ?? "normal") === "normal";
+  if (!supportsRebalancing && value.rebalancing !== "none") {
+    fieldErrors.rebalancing = "Rebalancing is available for Statistical Normal returns only.";
+  }
+  if (value.multi_goal_enabled) {
+    const goals = value.goals ?? [];
+    if (!goals.length) fieldErrors.goals = "Add at least one named goal.";
+    for (const [index, goal] of goals.entries()) {
+      if (!goal.purpose.trim() || goal.amount <= 0 || goal.starts_year >= goal.ends_year || goal.ends_year > value.simulation_period_years) {
+        fieldErrors[`goal-${index}`] = "Each goal needs a purpose, positive amount, and valid years within the horizon.";
+      }
+    }
+    if (!Number.isInteger(value.years_to_retirement) || (value.years_to_retirement ?? 0) < 1 || (value.years_to_retirement ?? 0) > value.simulation_period_years) {
+      fieldErrors.years_to_retirement = "Years to retirement must be within the simulation horizon.";
+    }
+    if (!Number.isInteger(value.glide_path_years) || (value.glide_path_years ?? 0) < 1 || (value.glide_path_years ?? 0) > (value.years_to_retirement ?? 0)) {
+      fieldErrors.glide_path_years = "Glide path years must be between 1 and years to retirement.";
+    }
+    const retirementTotal = (value.retirement_holdings ?? []).reduce((sum, holding) => sum + holding.weight, 0);
+    const primaryIds = new Set(value.holdings.map((holding) => holding.proj_id));
+    const retirementIds = new Set((value.retirement_holdings ?? []).map((holding) => holding.proj_id));
+    if (!value.retirement_holdings?.length || Math.abs(retirementTotal - 100) > 0.05) {
+      fieldErrors.retirement_holdings = "Retirement allocation weights must sum to 100%.";
+    } else if (primaryIds.size !== retirementIds.size || [...primaryIds].some((projId) => !retirementIds.has(projId))) {
+      fieldErrors.retirement_holdings = "Use the same fund IDs as the starting allocation; only weights change along the glide path.";
+    }
+  }
   function fieldError(field: string): string | null {
     return touched[field] ? (fieldErrors[field] ?? null) : null;
   }
   const canContinue = !running && Object.keys(fieldErrors).length === 0;
+
+  function changeSimulationModel(simulation_model: SimulateRequest["simulation_model"]) {
+    const timeSeriesModel = value.time_series_model ?? "normal";
+    onChange({
+      ...value,
+      simulation_model,
+      use_full_history: simulation_model === "historical" ? (value.use_full_history ?? true) : undefined,
+      rebalancing: simulation_model === "statistical" && timeSeriesModel === "normal" ? value.rebalancing : "none",
+    });
+  }
+
+  function changeTimeSeriesModel(time_series_model: SimulateRequest["time_series_model"]) {
+    patch({
+      time_series_model,
+      rebalancing: time_series_model === "normal" ? value.rebalancing : "none",
+    });
+  }
+
+  function toggleGoals(enabled: boolean) {
+    const goals = value.goals?.length ? value.goals : [defaultGoal(value.simulation_period_years)];
+    const retirementHoldings = value.retirement_holdings?.length ? value.retirement_holdings : value.holdings;
+    patch({
+      multi_goal_enabled: enabled,
+      goals,
+      years_to_retirement: value.years_to_retirement ?? Math.max(1, Math.floor(value.simulation_period_years / 2)),
+      glide_path_years: value.glide_path_years ?? Math.min(5, Math.max(1, Math.floor(value.simulation_period_years / 2))),
+      retirement_holdings: retirementHoldings,
+    });
+  }
+
+  function updateGoal(index: number, fields: Partial<NamedGoal>) {
+    const goals = [...(value.goals ?? [])];
+    goals[index] = { ...goals[index], ...fields };
+    patch({ goals });
+  }
+
+  function addGoal() {
+    patch({ goals: [...(value.goals ?? []), defaultGoal(value.simulation_period_years)] });
+  }
+
+  function removeGoal(index: number) {
+    patch({ goals: (value.goals ?? []).filter((_, goalIndex) => goalIndex !== index) });
+  }
+
+  function updateRetirementHolding(index: number, fields: Partial<Holding>) {
+    const retirementHoldings = [...(value.retirement_holdings ?? [])];
+    retirementHoldings[index] = { ...retirementHoldings[index], ...fields };
+    patch({ retirement_holdings: retirementHoldings });
+  }
 
   return (
     <div className={active ? "page active" : "page"}>
@@ -136,13 +227,30 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, ru
               <option value="after_tax">After-tax Returns</option>
             </select>
           </div>
+          {value.tax_treatment === "after_tax" ? (
+            <div className="form-field">
+              <label htmlFor="tax_rate">Effective tax rate</label>
+              <input
+                className="field num"
+                id="tax_rate"
+                min={0}
+                max={100}
+                step={1}
+                type="number"
+                value={(value.tax_rate ?? 0.2) * 100}
+                onChange={(e) => patch({ tax_rate: Number(e.target.value) / 100 })}
+                onBlur={() => markTouched("tax_rate")}
+              />
+              {fieldError("tax_rate") && <div className="field-error">{fieldError("tax_rate")}</div>}
+            </div>
+          ) : null}
           <div className="form-field">
             <label htmlFor="simulation_model" className="label-with-info">Simulation Model <InfoTip text={SIMULATION_MODEL_HELP} /></label>
             <select
               className="field"
               id="simulation_model"
               value={value.simulation_model}
-              onChange={(e) => patch({ simulation_model: e.target.value as SimulateRequest["simulation_model"] })}
+              onChange={(e) => changeSimulationModel(e.target.value as SimulateRequest["simulation_model"])}
             >
               <option value="historical">Historical Returns</option>
               <option value="forecasted">Forecasted Returns</option>
@@ -184,7 +292,7 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, ru
                   className="field"
                   id="time_series_model"
                   value={value.time_series_model ?? "normal"}
-                  onChange={(e) => patch({ time_series_model: e.target.value as SimulateRequest["time_series_model"] })}
+                  onChange={(e) => changeTimeSeriesModel(e.target.value as SimulateRequest["time_series_model"])}
                 >
                   <option value="normal">Normal</option>
                   <option value="garch">GARCH</option>
@@ -276,9 +384,6 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, ru
               <option value="contribute">Contribute fixed amount periodically</option>
               <option value="withdraw_fixed">Withdraw fixed amount periodically</option>
               <option value="withdraw_percent">Withdraw fixed percentage periodically</option>
-              <option value="rolling_average_spending">Rolling average spending rule</option>
-              <option value="geometric_spending">Geometric spending rule</option>
-              <option value="withdraw_life_expectancy">Withdraw based on life expectancy</option>
             </select>
           </div>
           {value.cashflow_mode && value.cashflow_mode !== "none" ? (
@@ -325,6 +430,101 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, ru
           ) : null}
         </div>
 
+        {/* ===== Goals & Glide Path ===== */}
+        <div className="section-title section-title-spaced">Goals &amp; glide path</div>
+        <label className="check-row" htmlFor="multi_goal_enabled">
+          <input
+            checked={Boolean(value.multi_goal_enabled)}
+            id="multi_goal_enabled"
+            onChange={(event) => toggleGoals(event.target.checked)}
+            type="checkbox"
+          />
+          <span>Enable named goals and glide path</span>
+        </label>
+        {value.multi_goal_enabled ? (
+          <div className="goals-editor">
+            <div className="goals-table">
+              <div className="goals-head">
+                <div>Purpose</div><div>Amount</div><div>Type</div><div>Inflation</div><div>Frequency</div><div>Starts</div><div>Ends</div><div />
+              </div>
+              {(value.goals ?? []).map((goal, index) => (
+                <div className="goal-row" key={`goal-${index}`}>
+                  <div className="form-field">
+                    <label className="sr-only" htmlFor={`goal-purpose-${index}`}>Goal purpose {index + 1}</label>
+                    <input className="field" id={`goal-purpose-${index}`} value={goal.purpose} onChange={(event) => updateGoal(index, { purpose: event.target.value })} />
+                  </div>
+                  <div className="form-field">
+                    <label className="sr-only" htmlFor={`goal-amount-${index}`}>Goal amount {index + 1}</label>
+                    <input className="field num" id={`goal-amount-${index}`} min={0} type="number" value={goal.amount} onChange={(event) => updateGoal(index, { amount: Number(event.target.value) })} />
+                  </div>
+                  <div className="form-field">
+                    <label className="sr-only" htmlFor={`goal-type-${index}`}>Goal type {index + 1}</label>
+                    <select className="field" id={`goal-type-${index}`} value={goal.is_withdrawal ? "withdrawal" : "contribution"} onChange={(event) => updateGoal(index, { is_withdrawal: event.target.value === "withdrawal" })}>
+                      <option value="withdrawal">Withdrawal</option>
+                      <option value="contribution">Contribution</option>
+                    </select>
+                  </div>
+                  <div className="form-field">
+                    <label className="sr-only" htmlFor={`goal-inflation-${index}`}>Goal inflation {index + 1}</label>
+                    <select className="field" id={`goal-inflation-${index}`} value={goal.inflation_adjusted ? "yes" : "no"} onChange={(event) => updateGoal(index, { inflation_adjusted: event.target.value === "yes" })}>
+                      <option value="yes">Adjusted</option>
+                      <option value="no">Fixed</option>
+                    </select>
+                  </div>
+                  <div className="form-field">
+                    <label className="sr-only" htmlFor={`goal-frequency-${index}`}>Goal frequency {index + 1}</label>
+                    <select className="field" id={`goal-frequency-${index}`} value={goal.frequency} onChange={(event) => updateGoal(index, { frequency: event.target.value as NamedGoal["frequency"] })}>
+                      <option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annually">Annually</option>
+                    </select>
+                  </div>
+                  <div className="form-field">
+                    <label className="sr-only" htmlFor={`goal-start-${index}`}>Goal starts year {index + 1}</label>
+                    <input className="field num" id={`goal-start-${index}`} min={0} type="number" value={goal.starts_year} onChange={(event) => updateGoal(index, { starts_year: Number(event.target.value) })} />
+                  </div>
+                  <div className="form-field">
+                    <label className="sr-only" htmlFor={`goal-end-${index}`}>Goal ends year {index + 1}</label>
+                    <input className="field num" id={`goal-end-${index}`} min={1} type="number" value={goal.ends_year} onChange={(event) => updateGoal(index, { ends_year: Number(event.target.value) })} />
+                  </div>
+                  <button aria-label={`Remove goal ${index + 1}`} className="icon-btn" disabled={(value.goals ?? []).length <= 1} onClick={() => removeGoal(index)} type="button">&times;</button>
+                  {fieldError(`goal-${index}`) ? <div className="field-error">{fieldError(`goal-${index}`)}</div> : null}
+                </div>
+              ))}
+            </div>
+            {fieldError("goals") ? <div className="field-error">{fieldError("goals")}</div> : null}
+            <button className="link-btn goals-add" onClick={addGoal} type="button">+ Add named goal</button>
+            <div className="form-grid section-title-spaced">
+              <div className="form-field">
+                <label htmlFor="years_to_retirement">Years to retirement</label>
+                <input className="field num" id="years_to_retirement" min={1} type="number" value={value.years_to_retirement ?? 1} onChange={(event) => patch({ years_to_retirement: Number(event.target.value) })} onBlur={() => markTouched("years_to_retirement")} />
+                {fieldError("years_to_retirement") ? <div className="field-error">{fieldError("years_to_retirement")}</div> : null}
+              </div>
+              <div className="form-field">
+                <label htmlFor="glide_path_years">Glide path years</label>
+                <input className="field num" id="glide_path_years" min={1} type="number" value={value.glide_path_years ?? 1} onChange={(event) => patch({ glide_path_years: Number(event.target.value) })} onBlur={() => markTouched("glide_path_years")} />
+                {fieldError("glide_path_years") ? <div className="field-error">{fieldError("glide_path_years")}</div> : null}
+              </div>
+            </div>
+            <div className="section-title section-title-spaced">Retirement allocation</div>
+            <p className="field-hint">The glide path changes weights across the same selected funds.</p>
+            <div className="holdings-table">
+              {(value.retirement_holdings ?? []).map((holding, index) => (
+                <div className="holdings-row" key={`retirement-holding-${index}`}>
+                  <div className="form-field">
+                    <label className="sr-only" htmlFor={`retirement-proj-${index}`}>Retirement fund {index + 1}</label>
+                    <input className="field" id={`retirement-proj-${index}`} value={holding.proj_id} onChange={(event) => updateRetirementHolding(index, { proj_id: event.target.value })} />
+                  </div>
+                  <div className="form-field">
+                    <label className="sr-only" htmlFor={`retirement-weight-${index}`}>Retirement weight {index + 1}</label>
+                    <input className="field num" id={`retirement-weight-${index}`} min={0} max={100} type="number" value={holding.weight} onChange={(event) => updateRetirementHolding(index, { weight: Number(event.target.value) })} />
+                  </div>
+                  <div />
+                </div>
+              ))}
+            </div>
+            {fieldError("retirement_holdings") ? <div className="field-error">{fieldError("retirement_holdings")}</div> : null}
+          </div>
+        ) : null}
+
         {/* ===== Inflation & Rebalancing ===== */}
         <div className="section-title section-title-spaced">Inflation &amp; Rebalancing</div>
         <div className="form-grid">
@@ -370,28 +570,32 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, ru
               </div>
             </>
           )}
-          <div className="form-field">
-            <label htmlFor="rebalancing">Rebalancing</label>
-            <select
-              className="field"
-              id="rebalancing"
-              value={value.rebalancing}
-              onChange={(e) => patch({ rebalancing: e.target.value as SimulateRequest["rebalancing"] })}
-            >
-              <option value="none">No rebalancing</option>
-              <option value="annual">Rebalance annually</option>
-              <option value="semiannual">Rebalance semi-annually</option>
-              <option value="quarterly">Rebalance quarterly</option>
-              <option value="monthly">Rebalance monthly</option>
-            </select>
-          </div>
+          {supportsRebalancing ? (
+            <div className="form-field">
+              <label htmlFor="rebalancing">Rebalancing</label>
+              <select className="field" id="rebalancing" value={value.rebalancing} onChange={(e) => patch({ rebalancing: e.target.value as SimulateRequest["rebalancing"] })}>
+                <option value="none">No rebalancing</option>
+                <option value="annual">Rebalance annually</option>
+                <option value="semiannual">Rebalance semi-annually</option>
+                <option value="quarterly">Rebalance quarterly</option>
+                <option value="monthly">Rebalance monthly</option>
+              </select>
+            </div>
+          ) : null}
+          {fieldError("rebalancing") ? <div className="field-error">{fieldError("rebalancing")}</div> : null}
         </div>
 
         {/* ===== Advanced Settings (optional) ===== */}
-        <div className={advancedOpen ? "advanced-toggle open" : "advanced-toggle"} onClick={() => setAdvancedOpen((open) => !open)}>
+        <button
+          aria-controls="advanced-settings"
+          aria-expanded={advancedOpen}
+          className={advancedOpen ? "advanced-toggle open" : "advanced-toggle"}
+          onClick={() => setAdvancedOpen((open) => !open)}
+          type="button"
+        >
           <span className="chev">&#9654;</span> Advanced settings
-        </div>
-        <div className={advancedOpen ? "advanced-body open" : "advanced-body"}>
+        </button>
+        <div className={advancedOpen ? "advanced-body open" : "advanced-body"} id="advanced-settings">
           <div className="form-grid">
             <div className="form-field">
               <label htmlFor="n_paths">Number of Simulation Paths</label>

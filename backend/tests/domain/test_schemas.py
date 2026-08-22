@@ -1,6 +1,7 @@
 import pytest
 from pydantic import ValidationError
-from backend.app.domain.schemas import SimulateRequest, Holding
+
+from backend.app.domain.schemas import Holding, SimulateRequest
 
 
 def test_valid_historical_request_parses():
@@ -15,7 +16,7 @@ def test_valid_historical_request_parses():
         bootstrap_model="single_year",
         use_full_history=True,
         sequence_of_returns_risk=0,
-        rebalancing="annual",
+        rebalancing="none",
         inflation_model="historical",
     )
     assert req.simulation_model == "historical"
@@ -32,7 +33,7 @@ def test_weights_must_sum_to_100():
             simulation_model="historical",
             n_paths=10000,
             seed=42,
-            rebalancing="annual",
+            rebalancing="none",
             inflation_model="historical",
         )
 
@@ -54,7 +55,7 @@ def test_glide_path_years_zero_is_rejected_at_validation_time():
             bootstrap_model="single_year",
             use_full_history=True,
             sequence_of_returns_risk=0,
-            rebalancing="annual",
+            rebalancing="none",
             inflation_model="historical",
             multi_goal_enabled=True,
             goals=[{"purpose": "Retirement", "is_withdrawal": True, "amount": 1000.0,
@@ -82,7 +83,7 @@ def test_sequence_of_returns_risk_rejected_with_glide_path():
             bootstrap_model="single_year",
             use_full_history=True,
             sequence_of_returns_risk=3,
-            rebalancing="annual",
+            rebalancing="none",
             inflation_model="historical",
             multi_goal_enabled=True,
             goals=[{"purpose": "Retirement", "is_withdrawal": True, "amount": 1000.0,
@@ -103,7 +104,7 @@ def test_parameterized_model_requires_expected_return_and_volatility():
             simulation_model="parameterized",
             n_paths=10000,
             seed=42,
-            rebalancing="annual",
+            rebalancing="none",
             inflation_model="parameterized",
             inflation_mean=0.03,
             inflation_volatility=0.01,

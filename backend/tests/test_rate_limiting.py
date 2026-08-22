@@ -18,7 +18,7 @@ def _payload() -> dict:
         "simulation_model": "parameterized",
         "n_paths": 1000,
         "seed": 1,
-        "rebalancing": "annual",
+        "rebalancing": "none",
         "distribution": "normal",
         "expected_return": 0.07,
         "expected_volatility": 0.14,

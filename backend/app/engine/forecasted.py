@@ -9,9 +9,13 @@ def simulate_forecasted(mu, sigma, weights, config, returns_df=None):
         port_mu = weights @ mu if mu is not None else float(np.nanmean(returns_df.to_numpy() @ weights)) * 252
         annual_returns = _garch_annual_returns(returns_df, weights, port_mu, n_years, n_paths, rng)
     elif config["time_series_model"] == "normal":
-        port_mu = weights @ mu
-        port_var = weights @ sigma @ weights
-        annual_returns = rng.normal(port_mu, np.sqrt(port_var), size=(n_paths, n_years))
+        # `mu`/`sigma` are estimated from daily log returns. Sample the annual
+        # portfolio log return, then convert it to a simple return before
+        # compounding the path.
+        port_log_mu = weights @ mu
+        port_log_var = weights @ sigma @ weights
+        annual_log_returns = rng.normal(port_log_mu, np.sqrt(max(port_log_var, 0.0)), size=(n_paths, n_years))
+        annual_returns = np.expm1(annual_log_returns)
     else:
         raise ValueError(f"unknown time_series_model: {config['time_series_model']}")
     growth = np.cumprod(1 + annual_returns, axis=1)
@@ -40,6 +44,6 @@ def _garch_annual_returns(returns_df, weights, port_mu, n_years, n_paths, rng):
     forecasts = res.forecast(horizon=252 * n_years, method="simulation", simulations=n_paths, reindex=False)
     sim_daily_shock_pct = forecasts.simulations.values[-1] / 100
     daily_mu = port_mu / 252
-    sim_daily = daily_mu + sim_daily_shock_pct
-    sim_daily = sim_daily.reshape(n_paths, n_years, 252)
-    return np.prod(1 + sim_daily, axis=2) - 1
+    sim_daily_log = daily_mu + sim_daily_shock_pct
+    sim_daily_log = sim_daily_log.reshape(n_paths, n_years, 252)
+    return np.expm1(sim_daily_log.sum(axis=2))

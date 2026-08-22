@@ -1,6 +1,12 @@
-import pytest
 import pandas as pd
-from backend.app.data.returns import NavGapError, build_price_panel, log_returns, estimate_mu_sigma
+import pytest
+
+from backend.app.data.returns import (
+    NavGapError,
+    build_price_panel,
+    estimate_mu_sigma,
+    log_returns,
+)
 
 
 def test_build_price_panel_pivots_a_single_fund():

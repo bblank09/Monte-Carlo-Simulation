@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
-from scipy.stats import norm
 from scipy.optimize import brentq
+from scipy.stats import norm
 
 _PCTS = [10, 25, 50, 75, 90]
 
@@ -80,7 +80,8 @@ def percentile_table(paths: np.ndarray, initial_amount: float, inflation_draws: 
     }
 
 
-def expected_return_by_horizon(paths: np.ndarray, horizons: list[int] = [1, 3, 5, 10, 15, 20, 25, 30]) -> dict:
+def expected_return_by_horizon(paths: np.ndarray, horizons: list[int] | None = None) -> dict:
+    horizons = horizons or [1, 3, 5, 10, 15, 20, 25, 30]
     n_years = paths.shape[1] - 1
     result = {}
     for h in horizons:
@@ -91,7 +92,13 @@ def expected_return_by_horizon(paths: np.ndarray, horizons: list[int] = [1, 3, 5
     return result
 
 
-def annual_return_probability(paths: np.ndarray, horizons: list[int] = [1, 3, 5, 10, 15, 20, 25, 30], thresholds: list[float] = [0.0, 0.025, 0.05, 0.075, 0.10, 0.125]) -> dict:
+def annual_return_probability(
+    paths: np.ndarray,
+    horizons: list[int] | None = None,
+    thresholds: list[float] | None = None,
+) -> dict:
+    horizons = horizons or [1, 3, 5, 10, 15, 20, 25, 30]
+    thresholds = thresholds or [0.0, 0.025, 0.05, 0.075, 0.10, 0.125]
     n_years = paths.shape[1] - 1
     result = {}
     for t in thresholds:
@@ -106,7 +113,12 @@ def annual_return_probability(paths: np.ndarray, horizons: list[int] = [1, 3, 5,
     return result
 
 
-def loss_probability(paths: np.ndarray, growth_only_paths: np.ndarray | None = None, thresholds: list[float] = [0.0, 0.025, 0.05, 0.075, 0.10, 0.125]) -> dict:
+def loss_probability(
+    paths: np.ndarray,
+    growth_only_paths: np.ndarray | None = None,
+    thresholds: list[float] | None = None,
+) -> dict:
+    thresholds = thresholds or [0.0, 0.025, 0.05, 0.075, 0.10, 0.125]
     def _for_pathset(pset: np.ndarray) -> dict:
         running_max = np.maximum.accumulate(pset, axis=1)
         drawdown = 1 - pset / running_max
@@ -172,9 +184,9 @@ def withdrawal_rates_by_percentile(paths: np.ndarray, n_years: int) -> dict:
     for i in range(n_paths):
         growth_factors = safe_growth_factors[i]
 
-        def final_balance(rate):
+        def final_balance(rate, factors=growth_factors):
             balance = 1.0
-            for g in growth_factors:
+            for g in factors:
                 balance = max(balance * g - rate, 0.0)
             return balance
 
@@ -200,20 +212,31 @@ def withdrawal_rates_by_percentile(paths: np.ndarray, n_years: int) -> dict:
 
 
 def survival_series(paths: np.ndarray) -> np.ndarray:
-    return (paths > 0).mean(axis=0)
+    # Survival means the path has remained strictly above zero through each point in
+    # time. A terminal-positive check would let a path that hit zero and later received
+    # a contribution recover into the survival population, which is not full-horizon
+    # solvency.
+    remained_positive = np.logical_and.accumulate(paths > 0, axis=1)
+    return remained_positive.mean(axis=0)
 
 
 def correlation_and_returns_table(returns_df: pd.DataFrame, asset_names: list[str], periods_per_year: int = 252) -> dict:
     correlation = returns_df[asset_names].corr()
-    cumulative = (1 + returns_df[asset_names]).prod()
-    n_periods = len(returns_df)
-    cagr = cumulative ** (periods_per_year / n_periods) - 1
-    expected_return = returns_df[asset_names].mean() * periods_per_year
-    volatility = returns_df[asset_names].std() * np.sqrt(periods_per_year)
+    log_returns = returns_df[asset_names]
+    cumulative_growth = np.exp(log_returns.sum())
+    n_periods = len(log_returns)
+    cagr = cumulative_growth ** (periods_per_year / n_periods) - 1
+    expected_return = np.expm1(log_returns.mean() * periods_per_year)
+    volatility = log_returns.std() * np.sqrt(periods_per_year)
+    correlation_values = correlation.to_numpy()
+    cagr_values = cagr.to_numpy()
     return {
-        "correlation": {a: {b: float(correlation.loc[a, b]) for b in asset_names} for a in asset_names},
+        "correlation": {
+            a: {b: float(correlation_values[row, column]) for column, b in enumerate(asset_names)}
+            for row, a in enumerate(asset_names)
+        },
         "stats": {
-            a: {"cagr": float(cagr[a]), "expected_return": float(expected_return[a]), "volatility": float(volatility[a])}
-            for a in asset_names
+            a: {"cagr": float(cagr_values[index]), "expected_return": float(expected_return[a]), "volatility": float(volatility[a])}
+            for index, a in enumerate(asset_names)
         },
     }
