@@ -581,7 +581,9 @@ export function ParametersStep({ active, value, onChange, onBack, onContinue, ru
                 <option value="monthly">Rebalance monthly</option>
               </select>
             </div>
-          ) : null}
+          ) : (
+            <p className="field-hint">Rebalancing is available for Statistical Normal returns only.</p>
+          )}
           {fieldError("rebalancing") ? <div className="field-error">{fieldError("rebalancing")}</div> : null}
         </div>
 
